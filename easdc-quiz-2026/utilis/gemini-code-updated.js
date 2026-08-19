@@ -1239,45 +1239,87 @@ export function TeamsPanel({ teams, onDeleteTeam, scores, onScoresChange, editab
   );
 }
 
+// Admin picks a specific round from a dropdown — Stage · Match ·
+// Round name, e.g. "Preliminary · Match 1 · Round 1: Categories" —
+// and sees every registered team's result for just that round,
+// ranked highest first, instead of every round dumped at once for
+// one team. Teams with no entry yet still show up as "Not yet
+// scored" so the admin can see who's missing at a glance.
 export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable }) {
-  const teamName = (id) => teams.find((t) => t.id === id)?.name || "Unknown team";
-  const [selectedTeamId, setSelectedTeamId] = useState(teams[0]?.id || "");
-  const activeTeamId = teams.some((team) => team.id === selectedTeamId) ? selectedTeamId : teams[0]?.id || "";
+  const grouped = groupRoundsForDisplay(rounds);
+  const [selectedRoundId, setSelectedRoundId] = useState(rounds[0]?.id || "");
+  const activeRoundId = rounds.some((r) => r.id === selectedRoundId) ? selectedRoundId : rounds[0]?.id || "";
+  const activeGroup = grouped.find((g) => g.items.some((r) => r.id === activeRoundId));
 
   const remove = async (id) => {
     await onScoresChange(scores.filter((s) => s.id !== id));
   };
 
-  const selectedScores = scores.filter((score) => score.teamId === activeTeamId);
+  const rows = teams
+    .map((team) => ({
+      team,
+      score: scores.find((s) => s.teamId === team.id && s.roundId === activeRoundId) || null,
+    }))
+    .sort((a, b) => (b.score?.points ?? -1) - (a.score?.points ?? -1));
+
+  const scoredCount = rows.filter((r) => r.score).length;
 
   return (
     <div>
-      {teams.length === 0 ? <EmptyNote>No teams registered yet.</EmptyNote> : (
+      {rounds.length === 0 ? (
+        <EmptyNote>No rounds configured yet.</EmptyNote>
+      ) : (
         <>
-          <Field label="Team">
-            <select value={activeTeamId} onChange={(e) => setSelectedTeamId(e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
-              {teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+          <Field
+            label="Round"
+            hint={teams.length > 0 ? `${scoredCount} of ${teams.length} teams scored` : undefined}
+          >
+            <select
+              value={activeRoundId}
+              onChange={(e) => setSelectedRoundId(e.target.value)}
+              className={inputBase}
+              style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}
+            >
+              {grouped.map((g) => (
+                <optgroup key={g.key} label={g.label}>
+                  {g.items.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </optgroup>
+              ))}
             </select>
           </Field>
-          {selectedScores.length === 0 ? <EmptyNote>{teamName(activeTeamId)} has no scores entered yet.</EmptyNote> : (
+
+          {teams.length === 0 ? (
+            <EmptyNote>No teams registered yet.</EmptyNote>
+          ) : (
             <div className="space-y-2">
-              {groupRoundsForDisplay(rounds).map((group) => group.items.map((round) => {
-                const score = selectedScores.find((entry) => entry.roundId === round.id);
-                if (!score) return null;
-                return (
-                  <div key={score.id} className="flex items-center justify-between rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide" style={{ color: "#9098B0" }}>{group.label}</div>
-                      <div className="font-medium text-sm" style={{ color: "#14213D" }}>{round.name}</div>
-                      <div className="text-xs mt-0.5" style={{ color: "#6B7490" }}>by {score.judgeName || "—"}</div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono font-700" style={{ color: "#06AED5" }}>{score.points}</span>
-                      {editable && <button onClick={() => remove(score.id)} style={{ color: "#EF6461" }} className="p-2" title="Delete score"><Trash2 size={16} /></button>}
+              {rows.map(({ team, score }, i) => (
+                <div key={team.id} className="flex items-center justify-between rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span
+                      className="font-mono font-700 text-xs w-7 h-7 rounded-full flex items-center justify-center shrink-0"
+                      style={{ background: score ? "#F0EEE7" : "#F7F5F0", color: "#6B7490" }}
+                    >
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate" style={{ color: "#14213D" }}>{team.name}</div>
+                      <div className="text-xs mt-0.5" style={{ color: "#6B7490" }}>
+                        {score ? `by ${score.judgeName || "—"}` : "Not yet scored"}
+                      </div>
                     </div>
                   </div>
-                );
-              }))}
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="font-mono font-700" style={{ color: score ? "#06AED5" : "#9098B0" }}>
+                      {score ? score.points : "—"}
+                    </span>
+                    {editable && score && (
+                      <button onClick={() => remove(score.id)} style={{ color: "#EF6461" }} className="p-2" title="Delete score">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </>
