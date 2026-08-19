@@ -1,1 +1,1 @@
-export { default } from "../utilis/gemini-code-1787075489749.js";
+export { default } from "../utilis/gemini-code-updated.js";

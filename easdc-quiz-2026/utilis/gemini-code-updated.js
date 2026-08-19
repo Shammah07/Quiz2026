@@ -268,6 +268,27 @@ export function roundsForPairings(config, pairings, releasedOnly = false) {
   return config.rounds.filter((round) => roundIds.has(round.id));
 }
 
+const STAGE_ORDER = ["preliminary", "quarter-final", "semi-final", "final"];
+
+export function pairingGroupRank(pairing) {
+  const stageRank = STAGE_ORDER.indexOf(pairing.stage);
+  const matchRank = pairing.stage === "preliminary"
+    ? PRELIM_MATCH_ORDER.indexOf(pairing.matchLabel)
+    : 0;
+  return stageRank * 100 + matchRank;
+}
+
+export function currentPairings(pairings, releasedOnly = false) {
+  const eligible = pairings.filter((pairing) => !releasedOnly || pairing.released === true);
+  const highestRank = Math.max(...eligible.map(pairingGroupRank), -1);
+  if (highestRank < 0) return [];
+  return eligible.filter((pairing) => pairingGroupRank(pairing) === highestRank);
+}
+
+export function currentGeneratedRounds(config, pairings) {
+  return roundsForPairings(config, currentPairings(pairings));
+}
+
 export function teamPointsIn(teamId, rounds, scores) {
   const ids = new Set(rounds.map((r) => r.id));
   return scores
@@ -526,7 +547,7 @@ export default function App() {
   const [teams, setTeams] = useState([]);
   const [scores, setScores] = useState([]);
   const [pairings, setPairings] = useState([]);
-  const [view, setView] = useState("landing"); // landing | setup | admin-login | admin | judge-login | judge | standings
+  const [view, setView] = useState("landing"); // landing | setup | admin-login | admin | judge-login | judge | standings | draw
   const [adminAuthed, setAdminAuthed] = useState(false);
   const [judgeSession, setJudgeSession] = useState(null); // { name }
 
@@ -586,6 +607,7 @@ export default function App() {
         <Landing
           config={config}
           onStandings={() => setView("standings")}
+          onDraw={() => setView("draw")}
           onJudge={() => setView("judge-login")}
           onAdmin={() => setView(adminAuthed ? "admin" : "admin-login")}
         />
@@ -680,6 +702,10 @@ export default function App() {
       {view === "standings" && config && (
         <Standings config={config} teams={teams} scores={scores} pairings={pairings} onRefresh={loadAll} onBack={() => setView("landing")} />
       )}
+
+      {view === "draw" && config && (
+        <PublicDraw config={config} teams={teams} pairings={pairings} scores={scores} onRefresh={loadAll} onBack={() => setView("landing")} />
+      )}
     </Shell>
   );
 }
@@ -696,7 +722,7 @@ export function Shell({ children }) {
    LANDING
 --------------------------------------------------------- */
 
-export function Landing({ config, onStandings, onJudge, onAdmin }) {
+export function Landing({ config, onStandings, onDraw, onJudge, onAdmin }) {
   const status = todayStatus(config);
   return (
     <div>
@@ -738,6 +764,23 @@ export function Landing({ config, onStandings, onJudge, onAdmin }) {
             </p>
           </div>
           <ChevronRight />
+        </div>
+      </button>
+
+      <button
+        onClick={onDraw}
+        className="w-full text-left rounded-2xl p-6 mb-4 border transition-transform active:scale-[0.99]"
+        style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <span className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-widest mb-3" style={{ color: "#06AED5" }}>
+              <Shuffle size={14} /> CURRENT DRAW
+            </span>
+            <h2 className="font-display font-700 text-xl" style={{ color: "#14213D" }}>See the draw</h2>
+            <p className="text-sm mt-1" style={{ color: "#6B7490" }}>The latest draw released by the admin.</p>
+          </div>
+          <ChevronRight color="#14213D" />
         </div>
       </button>
 
@@ -1249,7 +1292,6 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
   const grouped = groupRoundsForDisplay(rounds);
   const [selectedRoundId, setSelectedRoundId] = useState(rounds[0]?.id || "");
   const activeRoundId = rounds.some((r) => r.id === selectedRoundId) ? selectedRoundId : rounds[0]?.id || "";
-  const activeGroup = grouped.find((g) => g.items.some((r) => r.id === activeRoundId));
 
   const remove = async (id) => {
     await onScoresChange(scores.filter((s) => s.id !== id));
@@ -1608,7 +1650,7 @@ export function RegisterTeamForm({ teams, onRegisterTeam }) {
 
 export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onScoresChange }) {
   const [teamId, setTeamId] = useState("");
-  const generatedRounds = roundsForPairings(config, pairings);
+  const generatedRounds = currentGeneratedRounds(config, pairings);
   const [roundId, setRoundId] = useState(generatedRounds[0]?.id || "");
   const [points, setPoints] = useState("");
   const [err, setErr] = useState("");
@@ -1714,6 +1756,41 @@ export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onS
 
 export const MEDAL = ["#FFB627", "#C7CDD9", "#C97B4A"];
 
+export function PublicDraw({ config, teams, pairings, scores, onRefresh, onBack }) {
+  const latestReleased = currentPairings(pairings, true);
+  const teamName = (id) => (id ? teams.find((team) => team.id === id)?.name || "Unknown team" : "Bye");
+  const label = latestReleased[0]
+    ? latestReleased[0].stage === "preliminary"
+      ? `${STAGE_LABELS.preliminary} · ${latestReleased[0].matchLabel}`
+      : STAGE_LABELS[latestReleased[0].stage]
+    : "No released draw";
+
+  useEffect(() => {
+    const interval = setInterval(onRefresh, 6000);
+    return () => clearInterval(interval);
+  }, [onRefresh]);
+
+  return (
+    <div>
+      <button onClick={onBack} className="text-sm mb-6 inline-flex items-center gap-1" style={{ color: "#6B7490" }}>← Back</button>
+      <div className="mb-6">
+        <span className="font-mono text-[11px] tracking-widest" style={{ color: "#06AED5" }}>CURRENT DRAW</span>
+        <h1 className="font-display font-700 text-2xl mt-1" style={{ color: "#14213D" }}>{label}</h1>
+        <p className="text-sm mt-1" style={{ color: "#6B7490" }}>Only the latest draw released by the admin is shown.</p>
+      </div>
+      {latestReleased.length === 0 ? (
+        <EmptyNote>The admin has not released a draw yet.</EmptyNote>
+      ) : (
+        <BracketStageBlock
+          title={label}
+          rows={latestReleased.map((pairing) => ({ ...pairing, ...matchWinnerDetail(pairing, config, scores) }))}
+          teamName={teamName}
+        />
+      )}
+    </div>
+  );
+}
+
 export function BracketStageBlock({ title, rows, teamName }) {
   return (
     <div className="space-y-2">
@@ -1749,8 +1826,7 @@ export function Standings({ config, teams, scores, pairings, onRefresh, onBack }
   }, [onRefresh]);
 
   const publicRounds = roundsForPairings(config, pairings, true);
-  const preliminaryRounds = publicRounds.filter((round) => round.stage === "preliminary");
-  const allStandings = computeStandings(teams, scores, preliminaryRounds);
+  const allStandings = computeStandings(teams, scores, publicRounds);
   const standings = allStandings.filter((t) =>
     t.name.toLowerCase().includes(q.toLowerCase()) || (t.category || "").toLowerCase().includes(q.toLowerCase())
   );
@@ -1780,8 +1856,6 @@ export function Standings({ config, teams, scores, pairings, onRefresh, onBack }
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "#9098B0" }} />
         <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by team or category" className="pl-9" />
       </div>
-
-      <BracketPanel config={config} teams={teams} scores={scores} pairings={pairings} />
 
       {standings.length === 0 ? (
         <EmptyNote>No teams registered yet — check back once judges start registering teams.</EmptyNote>
