@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  Trophy, Shield, ClipboardList, Plus, Trash2, Check,
+  Trophy, Shield, ClipboardList, Plus, Trash2, Check, Shuffle,
   ChevronDown, ChevronUp, LogOut, Users, Settings as SettingsIcon,
   ListChecks, Search, Copy, CheckCircle2, AlertCircle, Loader2
 } from "lucide-react";
@@ -29,6 +29,7 @@ export const STORAGE = {
   config: "config",
   teams: "teams",
   scores: "scores",
+  pairings: "pairings",
 };
 
 export function useStorage() {
@@ -61,47 +62,86 @@ export function useStorage() {
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
+/* Fixed tournament structure, matched to the official rubric.
+   "match" groups rounds within the preliminary stage; knockout
+   stages have no match grouping, just a sequence of named rounds. */
+const ROUND_TEMPLATE = [
+  { stage: "preliminary", match: "Match 1", name: "Round 1: Categories" },
+  { stage: "preliminary", match: "Match 1", name: "Round 2: Written Puzzle Questions" },
+  { stage: "preliminary", match: "Match 2", name: "Round 1: Brain Maze Questions" },
+  { stage: "preliminary", match: "Match 2", name: "Round 2: East African Knowledge" },
+  { stage: "preliminary", match: "Match 3", name: "Round 1: Categories" },
+  { stage: "preliminary", match: "Match 3", name: "Round 2: Conquer the Clue Questions" },
+  { stage: "quarter-final", match: null, name: "Round 1: Category Selection" },
+  { stage: "quarter-final", match: null, name: "Round 2: Pictorial Round" },
+  { stage: "quarter-final", match: null, name: "Round 3: Categories (Death Wish Zone)" },
+  { stage: "quarter-final", match: null, name: "Round 4: Quickfire Questions" },
+  { stage: "semi-final", match: null, name: "Round 1: Mental Arithmetic" },
+  { stage: "semi-final", match: null, name: "Round 2: Think, Don't Know" },
+  { stage: "semi-final", match: null, name: "Round 3: Hot Seat" },
+  { stage: "semi-final", match: null, name: "Round 4: Visual Intelligence" },
+  { stage: "final", match: null, name: "Round 1: Fork in the Road" },
+  { stage: "final", match: null, name: "Round 2: Spelling Bee" },
+  { stage: "final", match: null, name: "Round 3: Memory Challenge" },
+  { stage: "final", match: null, name: "Round 4: Multimedia & Entertainment" },
+  { stage: "final", match: null, name: "Round 5: Echo Effect" },
+];
+
+export const STAGE_LABELS = {
+  preliminary: "Preliminary Rounds",
+  "quarter-final": "Quarter Finals",
+  "semi-final": "Semi Finals",
+  final: "Grand Finale",
+};
+
+// Reuses existing round ids when a template entry already exists in
+// storage (matched by stage+match+name), so previously entered scores
+// stay attached to the right round after a config reload.
+function buildRounds(existingRounds = []) {
+  return ROUND_TEMPLATE.map((tpl) => {
+    const existing = existingRounds.find(
+      (r) => r.stage === tpl.stage && r.match === tpl.match && r.name === tpl.name
+    );
+    return { id: existing?.id || uid(), ...tpl };
+  });
+}
+
+export function groupRoundsForDisplay(rounds) {
+  const groups = [];
+  const byKey = new Map();
+  rounds.forEach((r) => {
+    const key = `${r.stage}::${r.match || ""}`;
+    if (!byKey.has(key)) {
+      const label = r.match ? `${STAGE_LABELS[r.stage]} · ${r.match}` : STAGE_LABELS[r.stage];
+      const group = { key, label, items: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    byKey.get(key).items.push(r);
+  });
+  return groups;
+}
+
 export const defaultConfig = () => ({
   setupDone: false,
   name: "Quiz Tournament",
   startDate: "2026-09-09",
   endDate: "2026-09-15",
   maxScorePerRound: 100,
-  preliminaryRounds: 6,
   qualificationCount: 8,
   conflictAvoidance: "one-up-one-down",
   pairingMethod: "fold",
-  rounds: [
-    ...Array.from({ length: 6 }, (_, index) => ({ id: uid(), name: `Preliminary Round ${index + 1}`, stage: "preliminary" })),
-    ...Array.from({ length: 4 }, (_, index) => ({ id: uid(), name: `Quarter-final ${index + 1}`, stage: "quarter-final" })),
-    ...Array.from({ length: 2 }, (_, index) => ({ id: uid(), name: `Semi-final ${index + 1}`, stage: "semi-final" })),
-    { id: uid(), name: "Final", stage: "final" },
-  ],
+  rounds: buildRounds(),
 });
 
 export function normalizeConfig(config) {
   if (!config) return config;
-  const existingRounds = config.rounds || [];
-  const preliminary = existingRounds.slice(0, 6).map((round, index) => ({
-    ...round,
-    name: round.name || `Preliminary Round ${index + 1}`,
-    stage: "preliminary",
-  }));
-  while (preliminary.length < 6) {
-    preliminary.push({ id: uid(), name: `Preliminary Round ${preliminary.length + 1}`, stage: "preliminary" });
-  }
-  const knockout = [
-    ...Array.from({ length: 4 }, (_, index) => existingRounds.find((round) => round.stage === "quarter-final" && round.name === `Quarter-final ${index + 1}`) || ({ id: uid(), name: `Quarter-final ${index + 1}`, stage: "quarter-final" })),
-    ...Array.from({ length: 2 }, (_, index) => existingRounds.find((round) => round.stage === "semi-final" && round.name === `Semi-final ${index + 1}`) || ({ id: uid(), name: `Semi-final ${index + 1}`, stage: "semi-final" })),
-    existingRounds.find((round) => round.stage === "final") || { id: uid(), name: "Final", stage: "final" },
-  ];
   return {
     ...config,
-    preliminaryRounds: 6,
-    qualificationCount: 8,
+    qualificationCount: config.qualificationCount || 8,
     conflictAvoidance: config.conflictAvoidance || "one-up-one-down",
     pairingMethod: config.pairingMethod || "fold",
-    rounds: [...preliminary, ...knockout],
+    rounds: buildRounds(config.rounds),
   };
 }
 
@@ -139,6 +179,167 @@ export function computeFoldPairings(teams) {
     top: team,
     bottom: lower[index] || null,
   }));
+}
+
+/* ---------------------------------------------------------
+   PAIRING ENGINE
+   Preliminary: Controlled Swiss-Style Pairing (rematch avoidance,
+   paired by cumulative standing after each match).
+   Quarter Finals → Grand Finale: power-protected (fold) seeding,
+   with knockout winners advancing based on points scored within
+   that match's own rounds.
+--------------------------------------------------------- */
+
+const PRELIM_MATCH_ORDER = ["Match 1", "Match 2", "Match 3"];
+
+// Rounds belonging to one specific match/stage instance. Preliminary
+// rounds are scoped per match (Match 1/2/3 each have their own two
+// named rounds); knockout stages share one round set across all of
+// that stage's matches.
+export function stageRoundsFor(config, stage, matchLabel) {
+  if (stage === "preliminary") {
+    return config.rounds.filter((r) => r.stage === "preliminary" && r.match === matchLabel);
+  }
+  return config.rounds.filter((r) => r.stage === stage);
+}
+
+export function teamPointsIn(teamId, rounds, scores) {
+  const ids = new Set(rounds.map((r) => r.id));
+  return scores
+    .filter((s) => s.teamId === teamId && ids.has(s.roundId))
+    .reduce((sum, s) => sum + s.points, 0);
+}
+
+// Winner of a single paired match: whichever team scored more across
+// that match's own rounds. Returns null if scores are tied or not
+// yet fully entered (a genuine tie needs a judge's manual call, so
+// the app deliberately doesn't guess).
+export function matchWinner(pairing, config, scores) {
+  if (!pairing.teamAId || !pairing.teamBId) return pairing.teamAId || pairing.teamBId || null; // bye
+  const rounds = stageRoundsFor(config, pairing.stage, pairing.matchLabel);
+  const a = teamPointsIn(pairing.teamAId, rounds, scores);
+  const b = teamPointsIn(pairing.teamBId, rounds, scores);
+  if (a === b) return null;
+  return a > b ? pairing.teamAId : pairing.teamBId;
+}
+
+function shuffle(list) {
+  const arr = [...list];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Match 1 has no standings to pair by yet, so teams are randomly paired.
+export function generateMatch1Pairings(teams) {
+  const shuffled = shuffle(teams);
+  const pairings = [];
+  for (let i = 0; i < shuffled.length; i += 2) {
+    pairings.push({
+      id: uid(),
+      stage: "preliminary",
+      matchLabel: "Match 1",
+      teamAId: shuffled[i].id,
+      teamBId: shuffled[i + 1] ? shuffled[i + 1].id : null,
+    });
+  }
+  return pairings;
+}
+
+// Matches 2 & 3: pair teams by cumulative standing so far, walking
+// forward from each unpaired team to the nearest standing they
+// haven't already faced — the "one-up-one-down" conflict-avoidance
+// swap of a controlled Swiss system.
+export function generateSwissPairings(matchLabel, teams, config, scores, existingPairings) {
+  const matchIndex = PRELIM_MATCH_ORDER.indexOf(matchLabel);
+  const priorMatches = PRELIM_MATCH_ORDER.slice(0, matchIndex);
+  const priorRounds = priorMatches.flatMap((m) => stageRoundsFor(config, "preliminary", m));
+
+  const standings = [...teams].sort((a, b) => {
+    const diff = teamPointsIn(b.id, priorRounds, scores) - teamPointsIn(a.id, priorRounds, scores);
+    return diff !== 0 ? diff : a.name.localeCompare(b.name);
+  });
+
+  const priorOpponents = new Map(teams.map((t) => [t.id, new Set()]));
+  existingPairings
+    .filter((p) => p.stage === "preliminary" && priorMatches.includes(p.matchLabel))
+    .forEach((p) => {
+      if (p.teamAId && p.teamBId) {
+        priorOpponents.get(p.teamAId)?.add(p.teamBId);
+        priorOpponents.get(p.teamBId)?.add(p.teamAId);
+      }
+    });
+
+  const used = new Set();
+  const pairings = [];
+  for (let i = 0; i < standings.length; i++) {
+    const teamA = standings[i];
+    if (used.has(teamA.id)) continue;
+    used.add(teamA.id);
+
+    let partner = standings.slice(i + 1).find(
+      (c) => !used.has(c.id) && !priorOpponents.get(teamA.id)?.has(c.id)
+    );
+    if (!partner) partner = standings.slice(i + 1).find((c) => !used.has(c.id)) || null;
+    if (partner) used.add(partner.id);
+
+    pairings.push({
+      id: uid(),
+      stage: "preliminary",
+      matchLabel,
+      teamAId: teamA.id,
+      teamBId: partner ? partner.id : null,
+    });
+  }
+  return pairings;
+}
+
+// Power-protected (fold) seeding: best seed faces worst remaining
+// seed, protecting top seeds from meeting early. Used for every
+// knockout stage.
+export function generateFoldPairingsForStage(seededTeams, stage, labels) {
+  const midpoint = Math.ceil(seededTeams.length / 2);
+  const upper = seededTeams.slice(0, midpoint);
+  const lower = seededTeams.slice(midpoint).reverse();
+  return upper.map((team, index) => ({
+    id: uid(),
+    stage,
+    matchLabel: labels[index] || `${stage} ${index + 1}`,
+    teamAId: team.id,
+    teamBId: lower[index] ? lower[index].id : null,
+  }));
+}
+
+export function preliminarySeedOrder(teams, config, scores) {
+  const prelimRounds = config.rounds.filter((r) => r.stage === "preliminary");
+  return computeStandings(teams, scores, prelimRounds).slice(0, config.qualificationCount || 8);
+}
+
+export function generateQuarterFinalPairings(teams, config, scores) {
+  const top = preliminarySeedOrder(teams, config, scores);
+  return generateFoldPairingsForStage(top, "quarter-final", ["QF 1", "QF 2", "QF 3", "QF 4"]);
+}
+
+// Advances winners from one knockout stage while preserving their
+// original preliminary seed order, then re-seeds them fold-style.
+function advanceWinners(fromStage, toStage, labels, teams, config, scores, pairings) {
+  const seedOrder = preliminarySeedOrder(teams, config, scores);
+  const winnerIds = pairings
+    .filter((p) => p.stage === fromStage)
+    .map((p) => matchWinner(p, config, scores))
+    .filter(Boolean);
+  const advancing = seedOrder.filter((t) => winnerIds.includes(t.id));
+  return generateFoldPairingsForStage(advancing, toStage, labels);
+}
+
+export function generateSemiFinalPairings(teams, config, scores, pairings) {
+  return advanceWinners("quarter-final", "semi-final", ["SF 1", "SF 2"], teams, config, scores, pairings);
+}
+
+export function generateFinalPairing(teams, config, scores, pairings) {
+  return advanceWinners("semi-final", "final", ["Final"], teams, config, scores, pairings);
 }
 
 /* ---------------------------------------------------------
@@ -235,17 +436,19 @@ export default function App() {
   const [config, setConfig] = useState(null);
   const [teams, setTeams] = useState([]);
   const [scores, setScores] = useState([]);
+  const [pairings, setPairings] = useState([]);
   const [view, setView] = useState("landing"); // landing | setup | admin-login | admin | judge-login | judge | standings
   const [adminAuthed, setAdminAuthed] = useState(false);
   const [judgeSession, setJudgeSession] = useState(null); // { name }
 
   const loadAll = useCallback(async () => {
-    const [c, t, s] = await Promise.all([get(STORAGE.config), get(STORAGE.teams), get(STORAGE.scores)]);
+    const [c, t, s, p] = await Promise.all([get(STORAGE.config), get(STORAGE.teams), get(STORAGE.scores), get(STORAGE.pairings)]);
     const normalizedConfig = normalizeConfig(c);
     setConfig(normalizedConfig);
     setTeams(t || []);
     setScores(s || []);
-    return { c: normalizedConfig, t: t || [], s: s || [] };
+    setPairings(p || []);
+    return { c: normalizedConfig, t: t || [], s: s || [], p: p || [] };
   }, [get]);
 
   useEffect(() => {
@@ -313,6 +516,7 @@ export default function App() {
           config={config}
           teams={teams}
           scores={scores}
+          pairings={pairings}
           onConfigChange={async (next) => {
             const normalizedConfig = normalizeConfig(next);
             await set(STORAGE.config, normalizedConfig);
@@ -325,6 +529,10 @@ export default function App() {
           onScoresChange={async (next) => {
             await set(STORAGE.scores, next);
             setScores(next);
+          }}
+          onPairingsChange={async (next) => {
+            await set(STORAGE.pairings, next);
+            setPairings(next);
           }}
           onRefresh={loadAll}
           onLogout={() => {
@@ -369,7 +577,7 @@ export default function App() {
       )}
 
       {view === "standings" && config && (
-        <Standings config={config} teams={teams} scores={scores} onRefresh={loadAll} onBack={() => setView("landing")} />
+        <Standings config={config} teams={teams} scores={scores} pairings={pairings} onRefresh={loadAll} onBack={() => setView("landing")} />
       )}
     </Shell>
   );
@@ -528,6 +736,26 @@ export function AdminGate({ onSubmit, onCancel, hint }) {
   );
 }
 
+export function RoundStructurePreview({ rounds }) {
+  const groups = groupRoundsForDisplay(rounds);
+  return (
+    <div className="space-y-2.5">
+      {groups.map((g) => (
+        <div key={g.key} className="rounded-lg border px-3 py-2.5" style={{ borderColor: "#DBD8CE", background: "#F7F5F0" }}>
+          <div className="text-[11px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: "#06AED5" }}>
+            {g.label}
+          </div>
+          <ul className="space-y-0.5">
+            {g.items.map((r) => (
+              <li key={r.id} className="text-sm" style={{ color: "#14213D" }}>{r.name}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function GateShell({ icon, title, children, onCancel }) {
   return (
     <div className="max-w-sm mx-auto mt-8">
@@ -550,15 +778,8 @@ export function AdminSetup({ onDone }) {
   const [step, setStep] = useState(0);
   const [err, setErr] = useState("");
 
-  const updateRound = (id, name) =>
-    setCfg((c) => ({ ...c, rounds: c.rounds.map((r) => (r.id === id ? { ...r, name } : r)) }));
-  const addRound = () =>
-    setCfg((c) => ({ ...c, rounds: [...c.rounds, { id: uid(), name: `Round ${c.rounds.length + 1}` }] }));
-  const removeRound = (id) => setCfg((c) => ({ ...c, rounds: c.rounds.filter((r) => r.id !== id) }));
-
   const finish = () => {
     if (!cfg.name.trim()) return setErr("Give your tournament a name.");
-    if (cfg.rounds.length === 0) return setErr("Add at least one round.");
     setErr("");
     onDone({ ...cfg, setupDone: true });
   };
@@ -595,8 +816,8 @@ export function AdminSetup({ onDone }) {
         {step === 1 && (
           <>
             <div className="rounded-lg px-3 py-2.5 mb-5" style={{ background: "#E6F7F3", color: "#0F8A6B" }}>
-              <div className="font-semibold text-sm">Tournament format locked</div>
-              <div className="text-xs mt-1">6 preliminary rounds → top 8 qualify → quarter-finals → semi-finals → final</div>
+              <div className="font-semibold text-sm">Tournament format locked to the rubric</div>
+              <div className="text-xs mt-1">3 preliminary matches (2 rounds each) → top 8 qualify → quarter-finals → semi-finals → grand finale</div>
               <div className="text-xs mt-1">Pairing: Fold Method · Conflict avoidance: One-up-One-down</div>
             </div>
             <Field label="Max points per round">
@@ -608,17 +829,7 @@ export function AdminSetup({ onDone }) {
               />
             </Field>
             <span className="block text-xs font-semibold tracking-wide uppercase mb-2" style={{ color: "#6B7490" }}>Rounds</span>
-            <div className="space-y-2 mb-3">
-              {cfg.rounds.map((r) => (
-                <div key={r.id} className="flex gap-2">
-                  <TextInput value={r.name} onChange={(e) => updateRound(r.id, e.target.value)} />
-                  <button onClick={() => removeRound(r.id)} className="shrink-0 rounded-lg px-3" style={{ color: "#EF6461" }}>
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-            </div>
-            <Btn variant="ghost" onClick={addRound}><Plus size={15} /> Add round</Btn>
+            <RoundStructurePreview rounds={cfg.rounds} />
           </>
         )}
       </div>
@@ -724,7 +935,7 @@ export function StatCard({ label, value, accent = "#14213D" }) {
   );
 }
 
-export function AdminDashboard({ config, teams, scores, onConfigChange, onTeamsChange, onScoresChange, onRefresh, onLogout }) {
+export function AdminDashboard({ config, teams, scores, pairings, onConfigChange, onTeamsChange, onScoresChange, onPairingsChange, onRefresh, onLogout }) {
   const [tab, setTab] = useState("overview");
   const status = todayStatus(config);
 
@@ -739,6 +950,7 @@ export function AdminDashboard({ config, teams, scores, onConfigChange, onTeamsC
           { key: "settings", label: "Settings", icon: <SettingsIcon size={15} /> },
           { key: "teams", label: "Teams", icon: <Users size={15} /> },
           { key: "scores", label: "Scores", icon: <Trophy size={15} /> },
+          { key: "pairings", label: "Pairings", icon: <Shuffle size={15} /> },
         ]}
       />
 
@@ -761,6 +973,10 @@ export function AdminDashboard({ config, teams, scores, onConfigChange, onTeamsC
 
       {tab === "scores" && (
         <ScoresPanel teams={teams} scores={scores} rounds={config.rounds} onScoresChange={onScoresChange} editable />
+      )}
+
+      {tab === "pairings" && (
+        <PairingsPanel config={config} teams={teams} scores={scores} pairings={pairings} onPairingsChange={onPairingsChange} />
       )}
     </div>
   );
@@ -799,12 +1015,6 @@ export function SettingsPanel({ config, onConfigChange }) {
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState("");
 
-  const updateRound = (id, name) =>
-    setDraft((c) => ({ ...c, rounds: c.rounds.map((r) => (r.id === id ? { ...r, name } : r)) }));
-  const addRound = () =>
-    setDraft((c) => ({ ...c, rounds: [...c.rounds, { id: uid(), name: `Round ${c.rounds.length + 1}` }] }));
-  const removeRound = (id) => setDraft((c) => ({ ...c, rounds: c.rounds.filter((r) => r.id !== id) }));
-
   const save = async () => {
     if (!draft.name.trim()) return setErr("Give your tournament a name.");
     setErr("");
@@ -835,22 +1045,12 @@ export function SettingsPanel({ config, onConfigChange }) {
 
       <div className="rounded-lg px-3 py-2.5 mb-5" style={{ background: "#E6F7F3", color: "#0F8A6B" }}>
         <div className="font-semibold text-sm">Tournament format</div>
-        <div className="text-xs mt-1">6 preliminary rounds → top 8 qualify → quarter-finals → semi-finals → final</div>
+        <div className="text-xs mt-1">3 preliminary matches (2 rounds each) → top 8 qualify → quarter-finals → semi-finals → grand finale</div>
         <div className="text-xs mt-1">Pairing: Fold Method · Conflict avoidance: One-up-One-down</div>
       </div>
 
       <span className="block text-xs font-semibold tracking-wide uppercase mb-2" style={{ color: "#6B7490" }}>Rounds</span>
-      <div className="space-y-2 mb-2">
-        {draft.rounds.map((r) => (
-          <div key={r.id} className="flex gap-2">
-            <TextInput value={r.name} onChange={(e) => updateRound(r.id, e.target.value)} />
-            <button onClick={() => removeRound(r.id)} className="shrink-0 rounded-lg px-3" style={{ color: "#EF6461" }}>
-              <Trash2 size={16} />
-            </button>
-          </div>
-        ))}
-      </div>
-      <Btn variant="ghost" onClick={addRound} className="mb-6"><Plus size={15} /> Add round</Btn>
+      <div className="mb-6"><RoundStructurePreview rounds={draft.rounds} /></div>
 
       <Btn variant="gold" onClick={save} className="w-full mt-2">Save settings</Btn>
     </div>
@@ -927,6 +1127,108 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+export function PairingsPanel({ config, teams, scores, pairings, onPairingsChange }) {
+  const [busy, setBusy] = useState(null);
+  const top8 = preliminarySeedOrder(teams, config, scores);
+  const teamName = (id) => (id ? teams.find((t) => t.id === id)?.name || "Unknown team" : "Bye");
+
+  const hasPairings = (stage, matchLabel) =>
+    pairings.some((p) => p.stage === stage && (stage !== "preliminary" || p.matchLabel === matchLabel));
+
+  const sections = [
+    {
+      stage: "preliminary", matchLabel: "Match 1", label: "Preliminary · Match 1",
+      ready: teams.length >= 2,
+      note: "Random pairing — no standings exist yet.",
+      generate: () => generateMatch1Pairings(teams),
+    },
+    {
+      stage: "preliminary", matchLabel: "Match 2", label: "Preliminary · Match 2",
+      ready: hasPairings("preliminary", "Match 1"),
+      note: "Paired by cumulative points, avoiding repeat opponents from Match 1.",
+      generate: () => generateSwissPairings("Match 2", teams, config, scores, pairings),
+    },
+    {
+      stage: "preliminary", matchLabel: "Match 3", label: "Preliminary · Match 3",
+      ready: hasPairings("preliminary", "Match 2"),
+      note: "Paired by cumulative points, avoiding repeat opponents from Matches 1–2.",
+      generate: () => generateSwissPairings("Match 3", teams, config, scores, pairings),
+    },
+    {
+      stage: "quarter-final", matchLabel: null, label: "Quarter Finals",
+      ready: top8.length >= 2,
+      note: `Power-protected seeding from the top ${config.qualificationCount || 8} preliminary standings (best seed vs. worst).`,
+      generate: () => generateQuarterFinalPairings(teams, config, scores),
+    },
+    {
+      stage: "semi-final", matchLabel: null, label: "Semi Finals",
+      ready: hasPairings("quarter-final"),
+      note: "The 4 Quarter Final winners, re-seeded by original preliminary rank.",
+      generate: () => generateSemiFinalPairings(teams, config, scores, pairings),
+    },
+    {
+      stage: "final", matchLabel: null, label: "Grand Finale",
+      ready: hasPairings("semi-final"),
+      note: "The 2 Semi Final winners.",
+      generate: () => generateFinalPairing(teams, config, scores, pairings),
+    },
+  ];
+
+  const regenerate = async (sec) => {
+    setBusy(sec.label);
+    const next = sec.generate();
+    const others = pairings.filter((p) => !(p.stage === sec.stage && (sec.stage !== "preliminary" || p.matchLabel === sec.matchLabel)));
+    await onPairingsChange([...others, ...next]);
+    setBusy(null);
+  };
+
+  return (
+    <div className="space-y-3">
+      {sections.map((sec) => {
+        const rows = pairings.filter((p) => p.stage === sec.stage && (sec.stage !== "preliminary" || p.matchLabel === sec.matchLabel));
+        return (
+          <div key={sec.label} className="rounded-xl border p-4" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <span className="font-display font-700 text-sm" style={{ color: "#14213D" }}>{sec.label}</span>
+              <Btn
+                variant="ghost"
+                onClick={() => regenerate(sec)}
+                disabled={!sec.ready || busy === sec.label}
+                className="shrink-0"
+              >
+                <Shuffle size={14} /> {rows.length ? "Regenerate" : "Generate"}
+              </Btn>
+            </div>
+            <p className="text-[11px] mb-3" style={{ color: "#9098B0" }}>{sec.note}</p>
+            {!sec.ready ? (
+              <p className="text-xs" style={{ color: "#9098B0" }}>Waiting on the previous stage.</p>
+            ) : rows.length === 0 ? (
+              <p className="text-xs" style={{ color: "#9098B0" }}>Not generated yet.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {rows.map((p) => {
+                  const winner = sec.stage !== "preliminary" ? matchWinner(p, config, scores) : null;
+                  return (
+                    <div key={p.id} className="flex items-center justify-between text-sm rounded-lg px-2.5 py-1.5" style={{ background: "#F7F5F0" }}>
+                      <span style={{ color: winner === p.teamAId ? "#0F8A6B" : "#14213D", fontWeight: winner === p.teamAId ? 600 : 400 }}>
+                        {teamName(p.teamAId)}
+                      </span>
+                      <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
+                      <span style={{ color: winner === p.teamBId ? "#0F8A6B" : "#14213D", fontWeight: winner === p.teamBId ? 600 : 400 }}>
+                        {teamName(p.teamBId)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1079,7 +1381,11 @@ export function EnterScoreForm({ config, teams, scores, judgeName, onScoresChang
               className={inputBase}
               style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}
             >
-              {config.rounds.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              {groupRoundsForDisplay(config.rounds).map((g) => (
+                <optgroup key={g.key} label={g.label}>
+                  {g.items.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </optgroup>
+              ))}
             </select>
           </Field>
           <Field label={`Points (0–${config.maxScorePerRound})`} hint={existing ? "Already scored — submitting will update it." : undefined}>
@@ -1116,7 +1422,7 @@ export function EnterScoreForm({ config, teams, scores, judgeName, onScoresChang
 
 export const MEDAL = ["#FFB627", "#C7CDD9", "#C97B4A"];
 
-export function Standings({ config, teams, scores, onRefresh, onBack }) {
+export function Standings({ config, teams, scores, pairings, onRefresh, onBack }) {
   const [q, setQ] = useState("");
   const [expanded, setExpanded] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(new Date());
@@ -1132,13 +1438,11 @@ export function Standings({ config, teams, scores, onRefresh, onBack }) {
     return () => clearInterval(intervalRef.current);
   }, [onRefresh]);
 
-  const preliminaryRounds = config.rounds.filter((round) => round.stage === "preliminary").slice(0, 6);
+  const preliminaryRounds = config.rounds.filter((round) => round.stage === "preliminary");
   const allStandings = computeStandings(teams, scores, preliminaryRounds);
   const standings = allStandings.filter((t) =>
     t.name.toLowerCase().includes(q.toLowerCase()) || (t.category || "").toLowerCase().includes(q.toLowerCase())
   );
-  const qualified = allStandings.slice(0, config.qualificationCount || 8);
-  const pairings = computeFoldPairings(qualified);
 
   const copyStandings = () => {
     const text = standings.map((t, i) => `${i + 1}. ${t.name} — ${t.total}`).join("\n");
@@ -1166,9 +1470,7 @@ export function Standings({ config, teams, scores, onRefresh, onBack }) {
         <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by team or category" className="pl-9" />
       </div>
 
-      {qualified.length > 0 && (
-        <BracketPanel config={config} pairings={pairings} qualifiedCount={config.qualificationCount || 8} />
-      )}
+      <BracketPanel config={config} teams={teams} scores={scores} pairings={pairings} />
 
       {standings.length === 0 ? (
         <EmptyNote>No teams registered yet — check back once judges start registering teams.</EmptyNote>
@@ -1197,12 +1499,19 @@ export function Standings({ config, teams, scores, onRefresh, onBack }) {
                 {expanded === t.id ? <ChevronUp size={16} color="#9098B0" /> : <ChevronDown size={16} color="#9098B0" />}
               </button>
               {expanded === t.id && (
-                <div className="px-3.5 pb-3.5 pt-1 grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {config.rounds.map((r) => (
-                    <div key={r.id} className="rounded-lg px-2.5 py-2" style={{ background: "#F7F5F0" }}>
-                      <div className="text-[10px] uppercase tracking-wide" style={{ color: "#9098B0" }}>{r.name}</div>
-                      <div className="font-mono font-600 text-sm" style={{ color: "#14213D" }}>
-                        {t.byRound[r.id] ?? "—"}
+                <div className="px-3.5 pb-3.5 pt-1 space-y-2">
+                  {groupRoundsForDisplay(config.rounds).map((g) => (
+                    <div key={g.key}>
+                      <div className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: "#9098B0" }}>{g.label}</div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {g.items.map((r) => (
+                          <div key={r.id} className="rounded-lg px-2.5 py-2" style={{ background: "#F7F5F0" }}>
+                            <div className="text-[10px] uppercase tracking-wide" style={{ color: "#9098B0" }}>{r.name}</div>
+                            <div className="font-mono font-600 text-sm" style={{ color: "#14213D" }}>
+                              {t.byRound[r.id] ?? "—"}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
@@ -1222,47 +1531,81 @@ export function Standings({ config, teams, scores, onRefresh, onBack }) {
   );
 }
 
-export function BracketPanel({ config, pairings, qualifiedCount }) {
+export function BracketPanel({ config, teams, scores, pairings }) {
+  const qualifiedCount = config.qualificationCount || 8;
+  const teamName = (id) => (id ? teams.find((t) => t.id === id)?.name || "Unknown team" : "Bye");
+
+  const stageRows = (stage) =>
+    pairings
+      .filter((p) => p.stage === stage)
+      .map((p) => ({ ...p, winnerId: matchWinner(p, config, scores) }));
+
+  const qf = stageRows("quarter-final");
+  const sf = stageRows("semi-final");
+  const final = stageRows("final");
+
+  if (qf.length === 0) {
+    return (
+      <section className="rounded-xl border p-4 mb-4" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+        <div className="font-display font-700 text-lg mb-1" style={{ color: "#14213D" }}>Road to the final</div>
+        <p className="text-sm" style={{ color: "#6B7490" }}>
+          Quarter Final pairings haven't been drawn yet. The top {qualifiedCount} teams after all preliminary matches will qualify.
+        </p>
+      </section>
+    );
+  }
+
+  const StageBlock = ({ title, rows }) => (
+    <div className="space-y-2">
+      <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#06AED5" }}>{title}</div>
+      {rows.map((p) => (
+        <div key={p.id} className="flex items-center gap-2 text-sm">
+          <span
+            className="flex-1 rounded-lg px-2.5 py-2"
+            style={{
+              background: p.winnerId === p.teamAId ? "#E6F7F3" : "#F7F5F0",
+              color: "#14213D",
+              fontWeight: p.winnerId === p.teamAId ? 600 : 400,
+            }}
+          >
+            {teamName(p.teamAId)}
+          </span>
+          <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
+          <span
+            className="flex-1 rounded-lg px-2.5 py-2 text-right"
+            style={{
+              background: p.winnerId === p.teamBId ? "#E6F7F3" : "#F7F5F0",
+              color: "#14213D",
+              fontWeight: p.winnerId === p.teamBId ? 600 : 400,
+            }}
+          >
+            {teamName(p.teamBId)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+
   return (
-    <section className="rounded-xl border p-4 mb-4" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
-      <div className="flex items-start justify-between gap-3 mb-3">
+    <section className="rounded-xl border p-4 mb-4 space-y-4" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+      <div className="flex items-start justify-between gap-3">
         <div>
           <div className="font-display font-700 text-lg" style={{ color: "#14213D" }}>Road to the final</div>
           <p className="text-xs mt-1" style={{ color: "#6B7490" }}>
-            Top {qualifiedCount} after {config.preliminaryRounds || 6} preliminary rounds qualify. Pairing: Fold Method. Conflict avoidance: One-up-One-down.
+            Top {qualifiedCount} after preliminaries qualify. Power-protected seeding throughout the knockout stages.
           </p>
         </div>
-        <span className="font-mono text-[10px] tracking-widest" style={{ color: "#06AED5" }}>QUALIFICATION</span>
+        <span className="font-mono text-[10px] tracking-widest" style={{ color: "#06AED5" }}>BRACKET</span>
       </div>
-      {pairings.length < qualifiedCount ? (
-        <p className="text-sm" style={{ color: "#6B7490" }}>
-          {qualifiedCount - pairings.length} more qualifying teams are needed before quarter-final pairings are complete.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {pairings.map((pairing) => (
-            <div key={pairing.number} className="flex items-center gap-2 text-sm">
-              <span className="font-mono text-[10px] w-7" style={{ color: "#9098B0" }}>QF {pairing.number}</span>
-              <span className="flex-1 rounded-lg px-2.5 py-2" style={{ background: "#F7F5F0", color: "#14213D" }}>
-                {pairing.top.name}
-              </span>
-              <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
-              <span className="flex-1 rounded-lg px-2.5 py-2 text-right" style={{ background: "#F7F5F0", color: "#14213D" }}>
-                {pairing.bottom?.name || "Waiting"}
-              </span>
-            </div>
-          ))}
-          <div className="grid grid-cols-2 gap-2 pt-2">
-            {[1, 2].map((number) => (
-              <div key={number} className="rounded-lg border border-dashed px-2.5 py-2 text-xs" style={{ borderColor: "#DBD8CE", color: "#6B7490" }}>
-                Semi-final {number}: winner QF {number * 2 - 1} vs winner QF {number * 2}
-              </div>
-            ))}
-          </div>
-          <div className="rounded-lg px-2.5 py-2 text-xs text-center" style={{ background: "#14213D", color: "#F7F5F0" }}>
-            Final: winners of the two semi-finals
-          </div>
-        </div>
+
+      <StageBlock title="Quarter Finals" rows={qf} />
+      {sf.length > 0 && <StageBlock title="Semi Finals" rows={sf} />}
+      {sf.length === 0 && (
+        <p className="text-xs" style={{ color: "#9098B0" }}>Semi Final pairings will appear once all Quarter Finals have a winner.</p>
+      )}
+      {final.length > 0 && <StageBlock title="Grand Finale" rows={final} />}
+      {sf.length > 0 && final.length === 0 && (
+        <p className="text-xs" style={{ color: "#9098B0" }}>The Final pairing will appear once both Semi Finals have a winner.</p>
       )}
     </section>
   );
