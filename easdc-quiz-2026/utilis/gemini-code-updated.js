@@ -33,30 +33,31 @@ export const STORAGE = {
   judges: "judges",
 };
 
-export function useStorage() {
+export function useStorage(tournamentId = null) {
+  const scopedKey = useCallback((key) => tournamentId ? `tournament:${tournamentId}:${key}` : key, [tournamentId]);
   const get = useCallback(async (key) => {
     const { data, error } = await supabase
       .from("tournament_state")
       .select("value")
-      .eq("key", key)
+      .eq("key", scopedKey(key))
       .maybeSingle();
     if (error) {
       console.error("Storage read failed:", error.message);
       return null;
     }
     return data?.value ?? null;
-  }, []);
+  }, [scopedKey]);
 
   const set = useCallback(async (key, value) => {
     const { error } = await supabase
       .from("tournament_state")
-      .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: "key" });
+      .upsert({ key: scopedKey(key), value, tournament_id: tournamentId || null, updated_at: new Date().toISOString() }, { onConflict: "key" });
     if (error) {
       console.error("Storage write failed:", error.message);
       return false;
     }
     return true;
-  }, []);
+  }, [scopedKey, tournamentId]);
 
   return { get, set };
 }
@@ -71,11 +72,13 @@ export function useStorage() {
    a unique constraint doing the real work.
 --------------------------------------------------------- */
 
-export async function loadTeams() {
-  const { data, error } = await supabase
+export async function loadTeams(tournamentId = null) {
+  let query = supabase
     .from("teams")
     .select("id, name, category, members, registered_by, created_at")
     .order("created_at", { ascending: true });
+  if (tournamentId) query = query.eq("tournament_id", tournamentId);
+  const { data, error } = await query;
   if (error) {
     console.error("Failed to load teams:", error.message);
     return [];
@@ -90,10 +93,41 @@ export async function loadTeams() {
   }));
 }
 
-export async function registerTeam({ name, category, members, judgeName }) {
+export async function loadTournamentList() {
+  const { data, error } = await supabase
+    .from("tournaments")
+    .select("id, name, category, year, start_date, end_date, status, owner_id, created_at")
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.error("Tournament list unavailable:", error.message);
+    return [];
+  }
+  return data || [];
+}
+
+export async function createTournamentFromTemplate({ name, category, year, startDate, endDate, ownerId, templateConfig }) {
+  const { data: tournament, error } = await supabase
+    .from("tournaments")
+    .insert({ name, category, year, start_date: startDate || null, end_date: endDate || null, owner_id: ownerId, status: "draft" })
+    .select("id, name, category, year, start_date, end_date, status, owner_id, created_at")
+    .single();
+  if (error) return { ok: false, error: error.message };
+
+  const config = { ...(templateConfig || defaultConfig()), name, startDate, endDate, setupDone: true };
+  const initialState = ["config", "scores", "pairings", "rooms", "judges"].map((key) => ({
+    tournament_id: tournament.id,
+    key: `tournament:${tournament.id}:${key}`,
+    value: key === "config" ? config : [],
+  }));
+  const { error: stateError } = await supabase.from("tournament_state").insert(initialState);
+  if (stateError) return { ok: false, error: stateError.message };
+  return { ok: true, tournament };
+}
+
+export async function registerTeam({ tournamentId, name, category, members, judgeName }) {
   const { error } = await supabase
     .from("teams")
-    .insert({ name, category: category || null, members: members || null, registered_by: judgeName || null });
+    .insert({ tournament_id: tournamentId || null, name, category: category || null, members: members || null, registered_by: judgeName || null });
   if (error) {
     if (error.code === "23505") {
       return { ok: false, error: "A team with that name already exists." };
@@ -104,8 +138,10 @@ export async function registerTeam({ name, category, members, judgeName }) {
   return { ok: true };
 }
 
-export async function deleteTeamRow(id) {
-  const { error } = await supabase.from("teams").delete().eq("id", id);
+export async function deleteTeamRow(id, tournamentId = null) {
+  let query = supabase.from("teams").delete().eq("id", id);
+  if (tournamentId) query = query.eq("tournament_id", tournamentId);
+  const { error } = await query;
   if (error) {
     console.error("Failed to delete team:", error.message);
     return false;
@@ -155,7 +191,7 @@ function buildRounds(existingRounds = []) {
     const existing = existingRounds.find(
       (r) => r.stage === tpl.stage && r.match === tpl.match && r.name === tpl.name
     );
-    return { id: existing?.id || uid(), ...tpl };
+    return { id: existing?.id || uid(), ...tpl, name: existing?.name || tpl.name };
   });
 }
 
@@ -558,8 +594,13 @@ export function Banner({ kind = "error", children }) {
 --------------------------------------------------------- */
 
 export default function App() {
-  const { get, set } = useStorage();
+  const [activeTournamentId, setActiveTournamentId] = useState(() => {
+    if (typeof window === "undefined") return null;
+    return window.localStorage.getItem("activeTournamentId");
+  });
+  const { get, set } = useStorage(activeTournamentId);
   const [loading, setLoading] = useState(true);
+  const [tournaments, setTournaments] = useState([]);
   const [config, setConfig] = useState(null);
   const [teams, setTeams] = useState([]);
   const [scores, setScores] = useState([]);
@@ -571,7 +612,7 @@ export default function App() {
   const [judgeSession, setJudgeSession] = useState(null); // { name }
 
   const loadAll = useCallback(async () => {
-    const [c, t, s, p, r, j] = await Promise.all([get(STORAGE.config), loadTeams(), get(STORAGE.scores), get(STORAGE.pairings), get(STORAGE.rooms), get(STORAGE.judges)]);
+    const [c, t, s, p, r, j] = await Promise.all([get(STORAGE.config), loadTeams(activeTournamentId), get(STORAGE.scores), get(STORAGE.pairings), get(STORAGE.rooms), get(STORAGE.judges)]);
     const normalizedConfig = normalizeConfig(c);
     setConfig(normalizedConfig);
     setTeams(t || []);
@@ -583,15 +624,22 @@ export default function App() {
     setRooms(normalizedRooms);
     setJudges(normalizedJudges);
     return { c: normalizedConfig, t: t || [], s: s || [], p: normalizedPairings, r: normalizedRooms, j: normalizedJudges };
-  }, [get]);
+  }, [get, activeTournamentId]);
 
   useEffect(() => {
     (async () => {
+      const available = await loadTournamentList();
+      setTournaments(available);
+      const savedId = activeTournamentId && available.some((item) => item.id === activeTournamentId) ? activeTournamentId : available[0]?.id || null;
+      if (savedId !== activeTournamentId) {
+        setActiveTournamentId(savedId);
+        if (savedId) window.localStorage.setItem("activeTournamentId", savedId);
+      }
       const { c } = await loadAll();
       setView(c && c.setupDone ? "landing" : "gate-setup");
       setLoading(false);
     })();
-  }, [loadAll]);
+  }, [loadAll, activeTournamentId]);
 
   if (loading) {
     return (
@@ -654,13 +702,15 @@ export default function App() {
           pairings={pairings}
           rooms={rooms}
           judges={judges}
+          tournaments={tournaments}
+          activeTournamentId={activeTournamentId}
           onConfigChange={async (next) => {
             const normalizedConfig = normalizeConfig(next);
             await set(STORAGE.config, normalizedConfig);
             setConfig(normalizedConfig);
           }}
           onDeleteTeam={async (id) => {
-            const ok = await deleteTeamRow(id);
+            const ok = await deleteTeamRow(id, activeTournamentId);
             if (ok) setTeams((prev) => prev.filter((t) => t.id !== id));
             return ok;
           }}
@@ -682,11 +732,25 @@ export default function App() {
             await set(STORAGE.judges, normalizedJudges);
             setJudges(normalizedJudges);
           }}
+          onCreateTournament={async (fields) => {
+            const { data: { user } } = await supabase.auth.getUser();
+            const result = await createTournamentFromTemplate({ ...fields, ownerId: user?.id, templateConfig: config });
+            if (result.ok) {
+              const available = await loadTournamentList();
+              setTournaments(available);
+              window.localStorage.setItem("activeTournamentId", result.tournament.id);
+              setActiveTournamentId(result.tournament.id);
+              setView("landing");
+            }
+            return result;
+          }}
           onResetTournament={async () => {
+            let teamDelete = supabase.from("teams").delete().not("id", "is", null);
+            if (activeTournamentId) teamDelete = teamDelete.eq("tournament_id", activeTournamentId);
             await Promise.all([
               set(STORAGE.scores, []),
               set(STORAGE.pairings, []),
-              supabase.from("teams").delete().not("id", "is", null),
+              teamDelete,
             ]);
             await loadAll();
           }}
@@ -694,6 +758,11 @@ export default function App() {
           onLogout={() => {
             supabase.auth.signOut();
             setAdminAuthed(false);
+            setView("landing");
+          }}
+          onSelectTournament={(id) => {
+            window.localStorage.setItem("activeTournamentId", id);
+            setActiveTournamentId(id);
             setView("landing");
           }}
         />
@@ -717,7 +786,7 @@ export default function App() {
           pairings={pairings}
           judgeName={judgeSession.name}
           onRegisterTeam={async (fields) => {
-            const result = await registerTeam({ ...fields, judgeName: judgeSession.name });
+            const result = await registerTeam({ ...fields, tournamentId: activeTournamentId, judgeName: judgeSession.name });
             if (result.ok) await loadAll(); // pick up the DB-assigned id/timestamp
             return result;
           }}
@@ -1148,7 +1217,7 @@ function DangerZone({ onResetTournament }) {
   );
 }
 
-export function AdminDashboard({ config, teams, scores, pairings, rooms, judges, onConfigChange, onDeleteTeam, onScoresChange, onPairingsChange, onRoomsChange, onJudgesChange, onResetTournament, onRefresh, onLogout }) {
+export function AdminDashboard({ config, teams, scores, pairings, rooms, judges, tournaments, activeTournamentId, onConfigChange, onDeleteTeam, onScoresChange, onPairingsChange, onRoomsChange, onJudgesChange, onCreateTournament, onSelectTournament, onResetTournament, onRefresh, onLogout }) {
   const [tab, setTab] = useState("overview");
   const status = todayStatus(config);
 
@@ -1173,6 +1242,7 @@ export function AdminDashboard({ config, teams, scores, pairings, rooms, judges,
           { key: "pairings", label: "Pairings", icon: <Shuffle size={15} /> },
           { key: "rooms", label: "Rooms", icon: <ListChecks size={15} /> },
           { key: "judges", label: "Judges", icon: <Users size={15} /> },
+          { key: "tournaments", label: "Tournaments", icon: <Trophy size={15} /> },
         ]}
       />
 
@@ -1210,6 +1280,10 @@ export function AdminDashboard({ config, teams, scores, pairings, rooms, judges,
 
       {tab === "judges" && (
         <JudgesPanel judges={judges} onJudgesChange={onJudgesChange} />
+      )}
+
+      {tab === "tournaments" && (
+        <TournamentManager tournaments={tournaments} activeTournamentId={activeTournamentId} onSelectTournament={onSelectTournament} onCreateTournament={onCreateTournament} />
       )}
     </div>
   );
@@ -1283,7 +1357,18 @@ export function SettingsPanel({ config, onConfigChange }) {
       </div>
 
       <span className="block text-xs font-semibold tracking-wide uppercase mb-2" style={{ color: "#6B7490" }}>Rounds</span>
-      <div className="mb-6"><RoundStructurePreview rounds={draft.rounds} /></div>
+      <div className="space-y-3 mb-6">
+        {groupRoundsForDisplay(draft.rounds).map((group) => (
+          <div key={group.key} className="rounded-xl border p-3" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+            <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "#06AED5" }}>{group.label}</div>
+            {group.items.map((round) => (
+              <div key={round.id} className="mb-2 last:mb-0">
+                <TextInput value={round.name} onChange={(e) => setDraft((current) => ({ ...current, rounds: current.rounds.map((item) => item.id === round.id ? { ...item, name: e.target.value } : item) }))} />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
 
       <Btn variant="gold" onClick={save} className="w-full mt-2">Save settings</Btn>
     </div>
@@ -1352,6 +1437,43 @@ export function JudgesPanel({ judges, onJudgesChange }) {
             <button onClick={() => onJudgesChange(judges.filter((item) => item.id !== judge.id))} style={{ color: "#EF6461" }} className="p-2" title="Remove judge"><Trash2 size={16} /></button>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+export function TournamentManager({ tournaments, activeTournamentId, onSelectTournament, onCreateTournament }) {
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("TNDC Senior Quiz");
+  const [year, setYear] = useState(String(new Date().getFullYear() + 1));
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [error, setError] = useState("");
+
+  const create = async () => {
+    if (!name.trim() || !category.trim() || !year) return setError("Enter a tournament name, category, and year.");
+    setError("");
+    const result = await onCreateTournament({ name: name.trim(), category: category.trim(), year: Number(year), startDate, endDate });
+    if (!result.ok) setError(result.error || "Could not create the tournament.");
+  };
+
+  return (
+    <div>
+      {error && <Banner>{error}</Banner>}
+      <Field label="Active tournament">
+        <select value={activeTournamentId || ""} onChange={(e) => onSelectTournament(e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
+          {tournaments.length === 0 && <option value="">No tournament records yet</option>}
+          {tournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name} · {tournament.year}</option>)}
+        </select>
+      </Field>
+      <div className="rounded-xl border p-4 mb-5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+        <div className="font-display font-700 text-lg mb-3" style={{ color: "#14213D" }}>Create a new tournament</div>
+        <Field label="Tournament name"><TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. East African Debate Championship 2027" /></Field>
+        <Field label="Category"><TextInput value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. TNDC Junior Quiz" /></Field>
+        <Field label="Year"><TextInput type="number" value={year} onChange={(e) => setYear(e.target.value)} /></Field>
+        <div className="grid grid-cols-2 gap-3"><Field label="Starts"><TextInput type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} /></Field><Field label="Ends"><TextInput type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} /></Field></div>
+        <p className="text-xs mb-3" style={{ color: "#6B7490" }}>The current tournament rules are copied. Teams, scores, rooms, judges, and draws start empty.</p>
+        <Btn variant="gold" onClick={create} className="w-full"><Plus size={15} /> Create tournament</Btn>
       </div>
     </div>
   );
