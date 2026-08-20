@@ -29,6 +29,8 @@ export const STORAGE = {
   config: "config",
   scores: "scores",
   pairings: "pairings",
+  rooms: "rooms",
+  judges: "judges",
 };
 
 export function useStorage() {
@@ -198,6 +200,14 @@ export function normalizeConfig(config) {
 
 export function normalizePairings(pairings = []) {
   return pairings.map((pairing) => ({ ...pairing, released: pairing.released === true }));
+}
+
+export function normalizeRooms(rooms = []) {
+  return rooms.map((room) => ({ id: room.id || uid(), name: room.name || "", judgeId: room.judgeId || "" }));
+}
+
+export function normalizeJudges(judges = []) {
+  return judges.map((judge) => ({ id: judge.id || uid(), name: judge.name || "", email: judge.email || "" }));
 }
 
 export function todayStatus(cfg) {
@@ -427,6 +437,13 @@ export function preliminarySeedOrder(teams, config, scores) {
   return computeStandings(teams, scores, prelimRounds).slice(0, config.qualificationCount || 8);
 }
 
+export function teamsForCurrentPairingStage(teams, config, scores, pairings) {
+  const current = currentPairings(pairings);
+  if (current.length === 0 || current[0].stage === "preliminary") return teams;
+  const qualifiedIds = new Set(current.flatMap((pairing) => [pairing.teamAId, pairing.teamBId]).filter(Boolean));
+  return teams.filter((team) => qualifiedIds.has(team.id));
+}
+
 export function generateQuarterFinalPairings(teams, config, scores) {
   const top = preliminarySeedOrder(teams, config, scores);
   return generateFoldPairingsForStage(top, "quarter-final", ["QF 1", "QF 2", "QF 3", "QF 4"]);
@@ -547,19 +564,25 @@ export default function App() {
   const [teams, setTeams] = useState([]);
   const [scores, setScores] = useState([]);
   const [pairings, setPairings] = useState([]);
+  const [rooms, setRooms] = useState([]);
+  const [judges, setJudges] = useState([]);
   const [view, setView] = useState("landing"); // landing | setup | admin-login | admin | judge-login | judge | standings | draw
   const [adminAuthed, setAdminAuthed] = useState(false);
   const [judgeSession, setJudgeSession] = useState(null); // { name }
 
   const loadAll = useCallback(async () => {
-    const [c, t, s, p] = await Promise.all([get(STORAGE.config), loadTeams(), get(STORAGE.scores), get(STORAGE.pairings)]);
+    const [c, t, s, p, r, j] = await Promise.all([get(STORAGE.config), loadTeams(), get(STORAGE.scores), get(STORAGE.pairings), get(STORAGE.rooms), get(STORAGE.judges)]);
     const normalizedConfig = normalizeConfig(c);
     setConfig(normalizedConfig);
     setTeams(t || []);
     setScores(s || []);
     const normalizedPairings = normalizePairings(p || []);
     setPairings(normalizedPairings);
-    return { c: normalizedConfig, t: t || [], s: s || [], p: normalizedPairings };
+    const normalizedRooms = normalizeRooms(r || []);
+    const normalizedJudges = normalizeJudges(j || []);
+    setRooms(normalizedRooms);
+    setJudges(normalizedJudges);
+    return { c: normalizedConfig, t: t || [], s: s || [], p: normalizedPairings, r: normalizedRooms, j: normalizedJudges };
   }, [get]);
 
   useEffect(() => {
@@ -629,6 +652,8 @@ export default function App() {
           teams={teams}
           scores={scores}
           pairings={pairings}
+          rooms={rooms}
+          judges={judges}
           onConfigChange={async (next) => {
             const normalizedConfig = normalizeConfig(next);
             await set(STORAGE.config, normalizedConfig);
@@ -646,6 +671,16 @@ export default function App() {
           onPairingsChange={async (next) => {
             await set(STORAGE.pairings, next);
             setPairings(next);
+          }}
+          onRoomsChange={async (next) => {
+            const normalizedRooms = normalizeRooms(next);
+            await set(STORAGE.rooms, normalizedRooms);
+            setRooms(normalizedRooms);
+          }}
+          onJudgesChange={async (next) => {
+            const normalizedJudges = normalizeJudges(next);
+            await set(STORAGE.judges, normalizedJudges);
+            setJudges(normalizedJudges);
           }}
           onResetTournament={async () => {
             await Promise.all([
@@ -704,7 +739,7 @@ export default function App() {
       )}
 
       {view === "draw" && config && (
-        <PublicDraw config={config} teams={teams} pairings={pairings} scores={scores} onRefresh={loadAll} onBack={() => setView("landing")} />
+        <PublicDraw config={config} teams={teams} pairings={pairings} rooms={rooms} judges={judges} scores={scores} onRefresh={loadAll} onBack={() => setView("landing")} />
       )}
     </Shell>
   );
@@ -1113,7 +1148,7 @@ function DangerZone({ onResetTournament }) {
   );
 }
 
-export function AdminDashboard({ config, teams, scores, pairings, onConfigChange, onDeleteTeam, onScoresChange, onPairingsChange, onResetTournament, onRefresh, onLogout }) {
+export function AdminDashboard({ config, teams, scores, pairings, rooms, judges, onConfigChange, onDeleteTeam, onScoresChange, onPairingsChange, onRoomsChange, onJudgesChange, onResetTournament, onRefresh, onLogout }) {
   const [tab, setTab] = useState("overview");
   const status = todayStatus(config);
 
@@ -1136,6 +1171,8 @@ export function AdminDashboard({ config, teams, scores, pairings, onConfigChange
           { key: "teams", label: "Teams", icon: <Users size={15} /> },
           { key: "scores", label: "Scores", icon: <Trophy size={15} /> },
           { key: "pairings", label: "Pairings", icon: <Shuffle size={15} /> },
+          { key: "rooms", label: "Rooms", icon: <ListChecks size={15} /> },
+          { key: "judges", label: "Judges", icon: <Users size={15} /> },
         ]}
       />
 
@@ -1164,7 +1201,15 @@ export function AdminDashboard({ config, teams, scores, pairings, onConfigChange
       )}
 
       {tab === "pairings" && (
-        <PairingsPanel config={config} teams={teams} scores={scores} pairings={pairings} onPairingsChange={onPairingsChange} />
+        <PairingsPanel config={config} teams={teams} scores={scores} pairings={pairings} rooms={rooms} judges={judges} onPairingsChange={onPairingsChange} />
+      )}
+
+      {tab === "rooms" && (
+        <RoomsPanel rooms={rooms} judges={judges} onRoomsChange={onRoomsChange} />
+      )}
+
+      {tab === "judges" && (
+        <JudgesPanel judges={judges} onJudgesChange={onJudgesChange} />
       )}
     </div>
   );
@@ -1275,6 +1320,62 @@ export function TeamsPanel({ teams, onDeleteTeam, scores, onScoresChange, editab
                 <Trash2 size={16} />
               </button>
             )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function JudgesPanel({ judges, onJudgesChange }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+
+  const addJudge = () => {
+    if (!name.trim()) return;
+    onJudgesChange([...judges, { id: uid(), name: name.trim(), email: email.trim() }]);
+    setName("");
+    setEmail("");
+  };
+
+  return (
+    <div>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Field label="Judge name"><TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Alex N." /></Field>
+        <Field label="Judge email"><TextInput type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Optional" /></Field>
+      </div>
+      <Btn variant="accent" onClick={addJudge} className="w-full mb-5"><Plus size={15} /> Register judge</Btn>
+      <div className="space-y-2">
+        {judges.map((judge) => (
+          <div key={judge.id} className="flex items-center justify-between rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+            <div><div className="font-medium text-sm" style={{ color: "#14213D" }}>{judge.name}</div><div className="text-xs mt-0.5" style={{ color: "#6B7490" }}>{judge.email || "No email recorded"}</div></div>
+            <button onClick={() => onJudgesChange(judges.filter((item) => item.id !== judge.id))} style={{ color: "#EF6461" }} className="p-2" title="Remove judge"><Trash2 size={16} /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function RoomsPanel({ rooms, judges, onRoomsChange }) {
+  const [name, setName] = useState("");
+
+  const addRoom = () => {
+    if (!name.trim()) return;
+    onRoomsChange([...rooms, { id: uid(), name: name.trim(), judgeId: "" }]);
+    setName("");
+  };
+
+  const assignJudge = (roomId, judgeId) => onRoomsChange(rooms.map((room) => room.id === roomId ? { ...room, judgeId } : room));
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-5"><TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Room name or number" /><Btn variant="accent" onClick={addRoom}><Plus size={15} /> Add room</Btn></div>
+      <div className="space-y-2">
+        {rooms.map((room) => (
+          <div key={room.id} className="rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+            <div className="flex items-center justify-between gap-3"><span className="font-medium text-sm" style={{ color: "#14213D" }}>{room.name}</span><button onClick={() => onRoomsChange(rooms.filter((item) => item.id !== room.id))} style={{ color: "#EF6461" }} className="p-2" title="Remove room"><Trash2 size={16} /></button></div>
+            <Field label="Judge assigned to this room"><select value={room.judgeId || ""} onChange={(e) => assignJudge(room.id, e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}><option value="">Assign manually before release</option>{judges.map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
           </div>
         ))}
       </div>
@@ -1394,7 +1495,7 @@ function ResetDrawButton({ onConfirm }) {
   );
 }
 
-export function PairingsPanel({ config, teams, scores, pairings, onPairingsChange }) {
+export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, onPairingsChange }) {
   const [busy, setBusy] = useState(null);
   const top8 = preliminarySeedOrder(teams, config, scores);
   const teamName = (id) => (id ? teams.find((t) => t.id === id)?.name || "Unknown team" : "Bye");
@@ -1462,6 +1563,9 @@ export function PairingsPanel({ config, teams, scores, pairings, onPairingsChang
         : p
     )));
   };
+  const assignRoom = async (pairingId, roomId) => {
+    await onPairingsChange(pairings.map((pairing) => pairing.id === pairingId ? { ...pairing, roomId } : pairing));
+  };
 
   return (
     <div className="space-y-3">
@@ -1477,12 +1581,13 @@ export function PairingsPanel({ config, teams, scores, pairings, onPairingsChang
 
       {sections.map((sec) => {
         const rows = pairings.filter((p) => p.stage === sec.stage && (sec.stage !== "preliminary" || p.matchLabel === sec.matchLabel));
+        const canRelease = rows.length > 0 && rows.every((row) => row.roomId);
         return (
           <div key={sec.label} className="rounded-xl border p-4" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
             <div className="flex items-center justify-between gap-3 mb-1">
               <span className="font-display font-700 text-sm" style={{ color: "#14213D" }}>{sec.label}</span>
               <div className="flex gap-2 shrink-0">
-                {rows.length > 0 && <Btn variant={rows.every((row) => row.released) ? "accent" : "ghost"} onClick={() => setReleased(sec.stage, sec.matchLabel, !rows.every((row) => row.released))}>
+                {rows.length > 0 && <Btn variant={rows.every((row) => row.released) ? "accent" : "ghost"} disabled={!canRelease && !rows.every((row) => row.released)} onClick={() => setReleased(sec.stage, sec.matchLabel, !rows.every((row) => row.released))}>
                   {rows.every((row) => row.released) ? "Unrelease" : "Release to public"}
                 </Btn>}
                 <Btn variant="ghost" onClick={() => regenerate(sec)} disabled={!sec.ready || busy === sec.label}>
@@ -1513,8 +1618,15 @@ export function PairingsPanel({ config, teams, scores, pairings, onPairingsChang
                         </span>
                       </div>
                       <div className="text-[10px] mt-1 text-center" style={{ color: p.released ? "#0F8A6B" : "#9098B0" }}>
-                        {p.released ? "Released to public" : "Private draw"}
+                        {p.released ? "Released to public" : p.roomId ? "Room assigned · private draw" : "Assign a room before release"}
                       </div>
+                      <select value={p.roomId || ""} onChange={(e) => assignRoom(p.id, e.target.value)} className={inputBase + " mt-2 text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
+                        <option value="">Assign room manually</option>
+                        {rooms.map((room) => {
+                          const judge = judges.find((item) => item.id === room.judgeId);
+                          return <option key={room.id} value={room.id}>{room.name}{judge ? ` · Judge: ${judge.name}` : " · No judge assigned"}</option>;
+                        })}
+                      </select>
                       {detail.viaTiebreak && (
                         <div className="flex items-center justify-between mt-1.5">
                           <span className="text-[10px]" style={{ color: "#0F8A6B" }}>Decided by Category of Choice tiebreaker</span>
@@ -1649,8 +1761,9 @@ export function RegisterTeamForm({ teams, onRegisterTeam }) {
 }
 
 export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onScoresChange }) {
-  const [teamId, setTeamId] = useState("");
   const generatedRounds = currentGeneratedRounds(config, pairings);
+  const availableTeams = teamsForCurrentPairingStage(teams, config, scores, pairings);
+  const [teamId, setTeamId] = useState("");
   const [roundId, setRoundId] = useState(generatedRounds[0]?.id || "");
   const [points, setPoints] = useState("");
   const [err, setErr] = useState("");
@@ -1705,7 +1818,7 @@ export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onS
               style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}
             >
               <option value="">Select a team…</option>
-              {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {availableTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </Field>
           <Field label="Round">
@@ -1756,7 +1869,7 @@ export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onS
 
 export const MEDAL = ["#FFB627", "#C7CDD9", "#C97B4A"];
 
-export function PublicDraw({ config, teams, pairings, scores, onRefresh, onBack }) {
+export function PublicDraw({ config, teams, pairings, rooms, judges, scores, onRefresh, onBack }) {
   const latestReleased = currentPairings(pairings, true);
   const teamName = (id) => (id ? teams.find((team) => team.id === id)?.name || "Unknown team" : "Bye");
   const label = latestReleased[0]
@@ -1785,13 +1898,18 @@ export function PublicDraw({ config, teams, pairings, scores, onRefresh, onBack 
           title={label}
           rows={latestReleased.map((pairing) => ({ ...pairing, ...matchWinnerDetail(pairing, config, scores) }))}
           teamName={teamName}
+          roomLabel={(pairing) => {
+            const room = rooms.find((item) => item.id === pairing.roomId);
+            const judge = room && judges.find((item) => item.id === room.judgeId);
+            return room ? `${room.name}${judge ? ` · Judge: ${judge.name}` : ""}` : "Room pending";
+          }}
         />
       )}
     </div>
   );
 }
 
-export function BracketStageBlock({ title, rows, teamName }) {
+export function BracketStageBlock({ title, rows, teamName, roomLabel }) {
   return (
     <div className="space-y-2">
       <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#06AED5" }}>{title}</div>
@@ -1802,6 +1920,7 @@ export function BracketStageBlock({ title, rows, teamName }) {
             <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
             <span className="flex-1 rounded-lg px-2.5 py-2 text-right" style={{ background: p.winnerId === p.teamBId ? "#E6F7F3" : "#F7F5F0", color: "#14213D", fontWeight: p.winnerId === p.teamBId ? 600 : 400 }}>{teamName(p.teamBId)}</span>
           </div>
+          {roomLabel && <div className="text-[10px] mt-1 text-center" style={{ color: "#6B7490" }}>Room: {roomLabel(p)}</div>}
           {p.viaTiebreak && <div className="text-[10px] mt-0.5 text-center" style={{ color: "#0F8A6B" }}>Decided by Category of Choice tiebreaker</div>}
         </div>
       ))}
@@ -1811,6 +1930,7 @@ export function BracketStageBlock({ title, rows, teamName }) {
 
 export function Standings({ config, teams, scores, pairings, onRefresh, onBack }) {
   const [q, setQ] = useState("");
+  const [mode, setMode] = useState("preliminary");
   const [expanded, setExpanded] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [copied, setCopied] = useState(false);
@@ -1826,7 +1946,12 @@ export function Standings({ config, teams, scores, pairings, onRefresh, onBack }
   }, [onRefresh]);
 
   const publicRounds = roundsForPairings(config, pairings, true);
-  const allStandings = computeStandings(teams, scores, publicRounds);
+  const preliminaryRounds = publicRounds.filter((round) => round.stage === "preliminary");
+  const breakRounds = publicRounds.filter((round) => round.stage !== "preliminary");
+  const qualifiedTeams = preliminarySeedOrder(teams, config, scores);
+  const allStandings = mode === "preliminary"
+    ? computeStandings(teams, scores, preliminaryRounds)
+    : computeStandings(qualifiedTeams, scores, breakRounds);
   const standings = allStandings.filter((t) =>
     t.name.toLowerCase().includes(q.toLowerCase()) || (t.category || "").toLowerCase().includes(q.toLowerCase())
   );
@@ -1857,6 +1982,11 @@ export function Standings({ config, teams, scores, pairings, onRefresh, onBack }
         <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by team or category" className="pl-9" />
       </div>
 
+      <div className="flex gap-2 mb-5">
+        <Btn variant={mode === "preliminary" ? "primary" : "ghost"} onClick={() => setMode("preliminary")} className="flex-1">Preliminary rounds</Btn>
+        <Btn variant={mode === "break" ? "primary" : "ghost"} onClick={() => setMode("break")} className="flex-1">Break rounds</Btn>
+      </div>
+
       {standings.length === 0 ? (
         <EmptyNote>No teams registered yet — check back once judges start registering teams.</EmptyNote>
       ) : (
@@ -1885,7 +2015,7 @@ export function Standings({ config, teams, scores, pairings, onRefresh, onBack }
               </button>
               {expanded === t.id && (
                 <div className="px-3.5 pb-3.5 pt-1 space-y-2">
-                  {groupRoundsForDisplay(publicRounds).map((g) => (
+                  {groupRoundsForDisplay(mode === "preliminary" ? preliminaryRounds : breakRounds).map((g) => (
                     <div key={g.key}>
                       <div className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: "#9098B0" }}>{g.label}</div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
