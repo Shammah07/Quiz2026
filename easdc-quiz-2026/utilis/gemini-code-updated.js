@@ -33,6 +33,16 @@ export const STORAGE = {
   judges: "judges",
 };
 
+export function tournamentUrl(tournamentId) {
+  if (typeof window === "undefined") return `?tournament=${encodeURIComponent(tournamentId)}`;
+  return `${window.location.origin}/?tournament=${encodeURIComponent(tournamentId)}`;
+}
+
+export function readTournamentIdFromUrl() {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("tournament");
+}
+
 export function useStorage(tournamentId = null) {
   const scopedKey = useCallback((key) => tournamentId ? `tournament:${tournamentId}:${key}` : key, [tournamentId]);
   const get = useCallback(async (key) => {
@@ -108,7 +118,7 @@ export async function loadTournamentList() {
 export async function createTournamentFromTemplate({ name, category, year, startDate, endDate, ownerId, templateConfig }) {
   const { data: tournament, error } = await supabase
     .from("tournaments")
-    .insert({ name, category, year, start_date: startDate || null, end_date: endDate || null, owner_id: ownerId, status: "draft" })
+    .insert({ name, category, year, start_date: startDate || null, end_date: endDate || null, owner_id: ownerId, status: "active" })
     .select("id, name, category, year, start_date, end_date, status, owner_id, created_at")
     .single();
   if (error) return { ok: false, error: error.message };
@@ -596,7 +606,7 @@ export function Banner({ kind = "error", children }) {
 export default function App() {
   const [activeTournamentId, setActiveTournamentId] = useState(() => {
     if (typeof window === "undefined") return null;
-    return window.localStorage.getItem("activeTournamentId");
+    return readTournamentIdFromUrl() || window.localStorage.getItem("activeTournamentId");
   });
   const { get, set } = useStorage(activeTournamentId);
   const [loading, setLoading] = useState(true);
@@ -630,11 +640,17 @@ export default function App() {
     (async () => {
       const available = await loadTournamentList();
       setTournaments(available);
-      const savedId = activeTournamentId && available.some((item) => item.id === activeTournamentId) ? activeTournamentId : available[0]?.id || null;
+      const requestedId = readTournamentIdFromUrl();
+      const savedId = requestedId && available.some((item) => item.id === requestedId)
+        ? requestedId
+        : activeTournamentId && available.some((item) => item.id === activeTournamentId)
+          ? activeTournamentId
+          : available[0]?.id || null;
       if (savedId !== activeTournamentId) {
         setActiveTournamentId(savedId);
         if (savedId) window.localStorage.setItem("activeTournamentId", savedId);
       }
+      if (savedId !== activeTournamentId) return;
       const { c } = await loadAll();
       setView(c && c.setupDone ? "landing" : "gate-setup");
       setLoading(false);
@@ -739,6 +755,7 @@ export default function App() {
               const available = await loadTournamentList();
               setTournaments(available);
               window.localStorage.setItem("activeTournamentId", result.tournament.id);
+              window.history.replaceState({}, "", `/?tournament=${encodeURIComponent(result.tournament.id)}`);
               setActiveTournamentId(result.tournament.id);
               setView("landing");
             }
@@ -762,6 +779,7 @@ export default function App() {
           }}
           onSelectTournament={(id) => {
             window.localStorage.setItem("activeTournamentId", id);
+            window.history.replaceState({}, "", `/?tournament=${encodeURIComponent(id)}`);
             setActiveTournamentId(id);
             setView("landing");
           }}
@@ -1449,6 +1467,7 @@ export function TournamentManager({ tournaments, activeTournamentId, onSelectTou
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const create = async () => {
     if (!name.trim() || !category.trim() || !year) return setError("Enter a tournament name, category, and year.");
@@ -1466,6 +1485,17 @@ export function TournamentManager({ tournaments, activeTournamentId, onSelectTou
           {tournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name} · {tournament.year}</option>)}
         </select>
       </Field>
+      {activeTournamentId && (
+        <div className="rounded-xl border p-3 mb-5" style={{ borderColor: "#DBD8CE", background: "#F7F5F0" }}>
+          <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: "#6B7490" }}>Audience link</div>
+          <div className="flex gap-2 items-center">
+            <TextInput readOnly value={tournamentUrl(activeTournamentId)} className="text-xs" />
+            <Btn variant="ghost" onClick={() => { navigator.clipboard?.writeText(tournamentUrl(activeTournamentId)); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
+              <Copy size={14} /> {copied ? "Copied" : "Copy"}
+            </Btn>
+          </div>
+        </div>
+      )}
       <div className="rounded-xl border p-4 mb-5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
         <div className="font-display font-700 text-lg mb-3" style={{ color: "#14213D" }}>Create a new tournament</div>
         <Field label="Tournament name"><TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. East African Debate Championship 2027" /></Field>
