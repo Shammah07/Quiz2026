@@ -1518,7 +1518,11 @@ export function RoomsPanel({ rooms, judges, onRoomsChange }) {
     setName("");
   };
 
-  const assignJudge = (roomId, judgeId) => onRoomsChange(rooms.map((room) => room.id === roomId ? { ...room, judgeId } : room));
+  const assignJudge = (roomId, judgeId) => {
+    const alreadyAssigned = rooms.some((room) => room.id !== roomId && room.judgeId === judgeId);
+    if (judgeId && alreadyAssigned) return;
+    onRoomsChange(rooms.map((room) => room.id === roomId ? { ...room, judgeId } : room));
+  };
 
   return (
     <div>
@@ -1527,7 +1531,7 @@ export function RoomsPanel({ rooms, judges, onRoomsChange }) {
         {rooms.map((room) => (
           <div key={room.id} className="rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
             <div className="flex items-center justify-between gap-3"><span className="font-medium text-sm" style={{ color: "#14213D" }}>{room.name}</span><button onClick={() => onRoomsChange(rooms.filter((item) => item.id !== room.id))} style={{ color: "#EF6461" }} className="p-2" title="Remove room"><Trash2 size={16} /></button></div>
-            <Field label="Judge assigned to this room"><select value={room.judgeId || ""} onChange={(e) => assignJudge(room.id, e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}><option value="">Assign manually before release</option>{judges.map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
+            <Field label="Judge assigned to this room"><select value={room.judgeId || ""} onChange={(e) => assignJudge(room.id, e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}><option value="">Assign manually before release</option>{judges.filter((judge) => judge.id === room.judgeId || !rooms.some((otherRoom) => otherRoom.id !== room.id && otherRoom.judgeId === judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
           </div>
         ))}
       </div>
