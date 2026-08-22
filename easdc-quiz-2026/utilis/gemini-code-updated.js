@@ -1720,6 +1720,9 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
     )));
   };
   const assignRoom = async (pairingId, roomId, stage, matchLabel) => {
+    const sameDraw = pairings.filter((pairing) => pairing.stage === stage && (stage !== "preliminary" || pairing.matchLabel === matchLabel));
+    const alreadyUsed = sameDraw.some((pairing) => pairing.id !== pairingId && pairing.roomId === roomId);
+    if (roomId && alreadyUsed) return;
     await onPairingsChange(pairings.map((pairing) => pairing.id === pairingId ? { ...pairing, roomId } : pairing));
   };
 
@@ -1738,7 +1741,7 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
       {sections.map((sec) => {
         const rows = pairings.filter((p) => p.stage === sec.stage && (sec.stage !== "preliminary" || p.matchLabel === sec.matchLabel));
         const assignedRooms = rows.map((row) => row.roomId).filter(Boolean);
-        const canRelease = rows.length > 0 && assignedRooms.length === rows.length;
+        const canRelease = rows.length > 0 && assignedRooms.length === rows.length && new Set(assignedRooms).size === rows.length;
         return (
           <div key={sec.label} className="rounded-xl border p-4" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
             <div className="flex items-center justify-between gap-3 mb-1">
