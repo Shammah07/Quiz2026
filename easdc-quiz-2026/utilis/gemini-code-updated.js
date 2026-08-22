@@ -1719,10 +1719,7 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
         : p
     )));
   };
-  const assignRoom = async (pairingId, roomId, stage, matchLabel) => {
-    const sameDraw = pairings.filter((pairing) => pairing.stage === stage && (stage !== "preliminary" || pairing.matchLabel === matchLabel));
-    const alreadyUsed = sameDraw.some((pairing) => pairing.id !== pairingId && pairing.roomId === roomId);
-    if (roomId && alreadyUsed) return;
+  const assignRoom = async (pairingId, roomId) => {
     await onPairingsChange(pairings.map((pairing) => pairing.id === pairingId ? { ...pairing, roomId } : pairing));
   };
 
@@ -1741,7 +1738,7 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
       {sections.map((sec) => {
         const rows = pairings.filter((p) => p.stage === sec.stage && (sec.stage !== "preliminary" || p.matchLabel === sec.matchLabel));
         const assignedRooms = rows.map((row) => row.roomId).filter(Boolean);
-        const canRelease = rows.length > 0 && assignedRooms.length === rows.length && new Set(assignedRooms).size === rows.length;
+        const canRelease = rows.length > 0 && assignedRooms.length === rows.length;
         return (
           <div key={sec.label} className="rounded-xl border p-4" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
             <div className="flex items-center justify-between gap-3 mb-1">
@@ -1780,7 +1777,7 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
                       <div className="text-[10px] mt-1 text-center" style={{ color: p.released ? "#0F8A6B" : "#9098B0" }}>
                         {p.released ? "Released to public" : p.roomId ? "Room assigned · private draw" : "Assign a room before release"}
                       </div>
-                      <select value={p.roomId || ""} onChange={(e) => assignRoom(p.id, e.target.value, sec.stage, sec.matchLabel)} className={inputBase + " mt-2 text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
+                      <select value={p.roomId || ""} onChange={(e) => assignRoom(p.id, e.target.value)} className={inputBase + " mt-2 text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
                         <option value="">Assign room manually</option>
                         {rooms.filter((room) => room.id === p.roomId || !rows.some((row) => row.id !== p.id && row.roomId === room.id)).map((room) => {
                           const judge = judges.find((item) => item.id === room.judgeId);
