@@ -1777,7 +1777,7 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
                       </div>
                       <select value={p.roomId || ""} onChange={(e) => assignRoom(p.id, e.target.value)} className={inputBase + " mt-2 text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
                         <option value="">Assign room manually</option>
-                        {rooms.filter((room) => room.id === p.roomId || !rows.some((row) => row.id !== p.id && row.roomId === room.id)).map((room) => {
+                        {rooms.map((room) => {
                           const judge = judges.find((item) => item.id === room.judgeId);
                           return <option key={room.id} value={room.id}>{room.name}{judge ? ` · Judge: ${judge.name}` : " · No judge assigned"}</option>;
                         })}
