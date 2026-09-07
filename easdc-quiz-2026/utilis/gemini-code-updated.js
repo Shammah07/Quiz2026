@@ -38,6 +38,23 @@ export function tournamentUrl(tournamentId) {
   return `${window.location.origin}/?tournament=${encodeURIComponent(tournamentId)}`;
 }
 
+export function tournamentShortName(name = "Tournament") {
+  const words = name.match(/[A-Za-z0-9]+/g) || [];
+  const meaningfulWords = words.filter((word) => !["and", "of", "the"].includes(word.toLowerCase()));
+  return (meaningfulWords.length ? meaningfulWords : words).map((word) => word[0]).join("").toUpperCase() || "TOURNAMENT";
+}
+
+export function tournamentTitle(tournament, fallbackName = "Tournament") {
+  if (!tournament) return fallbackName;
+  const shortName = tournamentShortName(tournament.name);
+  return tournament.category ? `${shortName}-${tournament.category}` : shortName;
+}
+
+export function tournamentLabel(tournament) {
+  if (!tournament) return "No tournament selected";
+  return `${tournamentTitle(tournament)} · ${tournament.year}`;
+}
+
 export function readTournamentIdFromUrl() {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("tournament");
@@ -620,6 +637,7 @@ export default function App() {
   const [view, setView] = useState("landing"); // landing | setup | admin-login | admin | judge-login | judge | standings | draw
   const [adminAuthed, setAdminAuthed] = useState(false);
   const [judgeSession, setJudgeSession] = useState(null); // { name }
+  const activeTournament = tournaments.find((tournament) => tournament.id === activeTournamentId) || null;
 
   const loadAll = useCallback(async () => {
     const [c, t, s, p, r, j] = await Promise.all([get(STORAGE.config), loadTeams(activeTournamentId), get(STORAGE.scores), get(STORAGE.pairings), get(STORAGE.rooms), get(STORAGE.judges)]);
@@ -693,6 +711,7 @@ export default function App() {
       {view === "landing" && config && (
         <Landing
           config={config}
+          tournament={activeTournament}
           onStandings={() => setView("standings")}
           onDraw={() => setView("draw")}
           onJudge={() => setView("judge-login")}
@@ -713,6 +732,7 @@ export default function App() {
       {view === "admin" && config && (
         <AdminDashboard
           config={config}
+          tournament={activeTournament}
           teams={teams}
           scores={scores}
           pairings={pairings}
@@ -799,6 +819,7 @@ export default function App() {
       {view === "judge" && config && judgeSession && (
         <JudgeDashboard
           config={config}
+          tournament={activeTournament}
           teams={teams}
           scores={scores}
           pairings={pairings}
@@ -822,11 +843,11 @@ export default function App() {
       )}
 
       {view === "standings" && config && (
-        <Standings config={config} teams={teams} scores={scores} pairings={pairings} onRefresh={loadAll} onBack={() => setView("landing")} />
+        <Standings config={config} tournament={activeTournament} teams={teams} scores={scores} pairings={pairings} onRefresh={loadAll} onBack={() => setView("landing")} />
       )}
 
       {view === "draw" && config && (
-        <PublicDraw config={config} teams={teams} pairings={pairings} rooms={rooms} judges={judges} scores={scores} onRefresh={loadAll} onBack={() => setView("landing")} />
+        <PublicDraw config={config} tournament={activeTournament} teams={teams} pairings={pairings} rooms={rooms} judges={judges} scores={scores} onRefresh={loadAll} onBack={() => setView("landing")} />
       )}
     </Shell>
   );
@@ -844,7 +865,7 @@ export function Shell({ children }) {
    LANDING
 --------------------------------------------------------- */
 
-export function Landing({ config, onStandings, onDraw, onJudge, onAdmin }) {
+export function Landing({ config, tournament, onStandings, onDraw, onJudge, onAdmin }) {
   const status = todayStatus(config);
   return (
     <div>
@@ -861,7 +882,7 @@ export function Landing({ config, onStandings, onDraw, onJudge, onAdmin }) {
           <LiveDot status={status} />
         </div>
         <h1 className="font-display font-700 text-3xl sm:text-4xl leading-tight" style={{ color: "#14213D" }}>
-          {config.name}
+          {tournamentTitle(tournament, config.name)}
         </h1>
         <p className="font-mono text-xs mt-2" style={{ color: "#6B7490" }}>
           {formatDateRange(config.startDate, config.endDate)}
@@ -1226,16 +1247,16 @@ function DangerZone({ onResetTournament }) {
     <div className="rounded-xl border p-4" style={{ borderColor: "#F3C8C6", background: "#FDECEB" }}>
       <div className="font-semibold text-sm mb-1" style={{ color: "#C1443E" }}>Danger zone</div>
       <p className="text-xs mb-3" style={{ color: "#C1443E" }}>
-        Permanently deletes every registered team, score, and pairing. Tournament settings and admin/judge accounts are kept. Use this to clear test data before the real tournament starts — this cannot be undone.
+        Permanently clears every registered team, score, and pairing for the active tournament. Tournament settings and admin/judge accounts are kept. Use this when the tournament is complete or test data must be removed — this cannot be undone.
       </p>
       <Btn variant={confirming ? "danger" : "ghost"} onClick={handleClick} disabled={running} className="w-full">
-        <Trash2 size={15} /> {running ? "Resetting…" : confirming ? "Click again to permanently reset" : "Reset tournament data"}
+        <Trash2 size={15} /> {running ? "Clearing…" : confirming ? "Click again to permanently clear" : "Clear active tournament data"}
       </Btn>
     </div>
   );
 }
 
-export function AdminDashboard({ config, teams, scores, pairings, rooms, judges, tournaments, activeTournamentId, onConfigChange, onDeleteTeam, onScoresChange, onPairingsChange, onRoomsChange, onJudgesChange, onCreateTournament, onSelectTournament, onResetTournament, onRefresh, onLogout }) {
+export function AdminDashboard({ config, tournament, teams, scores, pairings, rooms, judges, tournaments, activeTournamentId, onConfigChange, onDeleteTeam, onScoresChange, onPairingsChange, onRoomsChange, onJudgesChange, onCreateTournament, onSelectTournament, onResetTournament, onRefresh, onLogout }) {
   const [tab, setTab] = useState("overview");
   const status = todayStatus(config);
 
@@ -1248,7 +1269,7 @@ export function AdminDashboard({ config, teams, scores, pairings, rooms, judges,
 
   return (
     <div>
-      <DashHeader title={config.name} subtitle="Admin" status={status} onLogout={onLogout} onRefresh={onRefresh} />
+      <DashHeader title={tournamentTitle(tournament, config.name)} subtitle={`Admin · ${tournament?.year || ""}`} status={status} onLogout={onLogout} onRefresh={onRefresh} />
       <Tabs
         active={tab}
         onChange={setTab}
@@ -1482,9 +1503,27 @@ export function TournamentManager({ tournaments, activeTournamentId, onSelectTou
       <Field label="Active tournament">
         <select value={activeTournamentId || ""} onChange={(e) => onSelectTournament(e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
           {tournaments.length === 0 && <option value="">No tournament records yet</option>}
-          {tournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name} · {tournament.year}</option>)}
+          {tournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournamentLabel(tournament)}</option>)}
         </select>
       </Field>
+      {tournaments.length > 0 && (
+        <div className="rounded-xl border p-3 mb-5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
+          <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: "#6B7490" }}>Tournament links</div>
+          <div className="space-y-2">
+            {tournaments.map((tournament) => (
+              <div key={tournament.id} className="flex gap-2 items-center">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold truncate" style={{ color: "#14213D" }}>{tournamentLabel(tournament)}</div>
+                  <TextInput readOnly value={tournamentUrl(tournament.id)} className="text-xs mt-1" />
+                </div>
+                <Btn variant="ghost" onClick={() => { navigator.clipboard?.writeText(tournamentUrl(tournament.id)); setCopied(tournament.id); setTimeout(() => setCopied(false), 1500); }}>
+                  <Copy size={14} /> {copied === tournament.id ? "Copied" : "Copy"}
+                </Btn>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {activeTournamentId && (
         <div className="rounded-xl border p-3 mb-5" style={{ borderColor: "#DBD8CE", background: "#F7F5F0" }}>
           <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: "#6B7490" }}>Audience link</div>
@@ -1831,7 +1870,7 @@ export function EmptyNote({ children }) {
    JUDGE DASHBOARD
 --------------------------------------------------------- */
 
-export function JudgeDashboard({ config, teams, scores, pairings, judgeName, onRegisterTeam, onScoresChange, onRefresh, onLogout }) {
+export function JudgeDashboard({ config, tournament, teams, scores, pairings, judgeName, onRegisterTeam, onScoresChange, onRefresh, onLogout }) {
   const [tab, setTab] = useState("register");
   const status = todayStatus(config);
 
@@ -1844,7 +1883,7 @@ export function JudgeDashboard({ config, teams, scores, pairings, judgeName, onR
 
   return (
     <div>
-      <DashHeader title={config.name} subtitle={`Judge · ${judgeName}`} status={status} onLogout={onLogout} onRefresh={onRefresh} />
+      <DashHeader title={tournamentTitle(tournament, config.name)} subtitle={`Judge · ${judgeName} · ${tournament?.year || ""}`} status={status} onLogout={onLogout} onRefresh={onRefresh} />
       <Tabs
         active={tab}
         onChange={setTab}
@@ -2026,7 +2065,7 @@ export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onS
 
 export const MEDAL = ["#FFB627", "#C7CDD9", "#C97B4A"];
 
-export function PublicDraw({ config, teams, pairings, rooms, judges, scores, onRefresh, onBack }) {
+export function PublicDraw({ config, tournament, teams, pairings, rooms, judges, scores, onRefresh, onBack }) {
   const latestReleased = currentPairings(pairings, true);
   const teamName = (id) => (id ? teams.find((team) => team.id === id)?.name || "Unknown team" : "Bye");
   const label = latestReleased[0]
@@ -2044,7 +2083,7 @@ export function PublicDraw({ config, teams, pairings, rooms, judges, scores, onR
     <div>
       <button onClick={onBack} className="text-sm mb-6 inline-flex items-center gap-1" style={{ color: "#6B7490" }}>← Back</button>
       <div className="mb-6">
-        <span className="font-mono text-[11px] tracking-widest" style={{ color: "#06AED5" }}>CURRENT DRAW</span>
+        <span className="font-mono text-[11px] tracking-widest" style={{ color: "#06AED5" }}>{tournamentTitle(tournament, config.name)}</span>
         <h1 className="font-display font-700 text-2xl mt-1" style={{ color: "#14213D" }}>{label}</h1>
         <p className="text-sm mt-1" style={{ color: "#6B7490" }}>Only the latest draw released by the admin is shown.</p>
       </div>
@@ -2085,7 +2124,7 @@ export function BracketStageBlock({ title, rows, teamName, roomLabel }) {
   );
 }
 
-export function Standings({ config, teams, scores, pairings, onRefresh, onBack }) {
+export function Standings({ config, tournament, teams, scores, pairings, onRefresh, onBack }) {
   const [q, setQ] = useState("");
   const [mode, setMode] = useState("preliminary");
   const [expanded, setExpanded] = useState(null);
@@ -2115,7 +2154,7 @@ export function Standings({ config, teams, scores, pairings, onRefresh, onBack }
 
   const copyStandings = () => {
     const text = standings.map((t, i) => `${i + 1}. ${t.name} — ${t.total}`).join("\n");
-    navigator.clipboard?.writeText(`${config.name} — Standings\n\n${text}`);
+    navigator.clipboard?.writeText(`${tournamentTitle(tournament, config.name)} — Standings\n\n${text}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -2131,7 +2170,7 @@ export function Standings({ config, teams, scores, pairings, onRefresh, onBack }
             updated {lastUpdated.toLocaleTimeString()}
           </span>
         </div>
-        <h1 className="font-display font-700 text-2xl mt-1" style={{ color: "#14213D" }}>{config.name}</h1>
+        <h1 className="font-display font-700 text-2xl mt-1" style={{ color: "#14213D" }}>{tournamentTitle(tournament, config.name)}</h1>
       </div>
 
       <div className="relative mb-4">
