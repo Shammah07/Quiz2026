@@ -1512,7 +1512,7 @@ export function TournamentManager({ tournaments, activeTournamentId, onSelectTou
             {tournaments.map((tournament) => (
               <div key={tournament.id} className="flex gap-2 items-center">
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold truncate" style={{ color: "#14213D" }}>{tournamentLabel(tournament)}</div>
+                  <div className="text-xs font-semibold truncate" style={{ color: "#14213D" }}>{tournament.category?.trim() || "Unnamed category"}</div>
                   <TextInput readOnly value={tournamentUrl(tournament.id)} className="text-xs mt-1" />
                 </div>
                 <Btn variant="ghost" onClick={() => { navigator.clipboard?.writeText(tournamentUrl(tournament.id)); setCopied(tournament.id); setTimeout(() => setCopied(false), 1500); }}>
