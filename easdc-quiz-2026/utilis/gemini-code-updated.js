@@ -46,8 +46,7 @@ export function tournamentShortName(name = "Tournament") {
 
 export function tournamentTitle(tournament, fallbackName = "Tournament") {
   if (!tournament) return fallbackName;
-  const shortName = tournamentShortName(tournament.name);
-  return tournament.category ? `${shortName}-${tournament.category}` : shortName;
+  return tournament.category?.trim() || fallbackName;
 }
 
 export function tournamentLabel(tournament) {
