@@ -296,7 +296,12 @@ export function normalizePairings(pairings = []) {
 }
 
 export function normalizeRooms(rooms = []) {
-  return rooms.map((room) => ({ id: room.id || uid(), name: room.name || "", judgeId: room.judgeId || "" }));
+  return rooms.map((room) => ({
+    id: room.id || uid(),
+    name: room.name || "",
+    judgeId: room.judgeId || "",
+    panelistIds: Array.isArray(room.panelistIds) ? room.panelistIds : [],
+  }));
 }
 
 export function normalizeJudges(judges = []) {
@@ -1626,14 +1631,28 @@ export function RoomsPanel({ rooms, judges, onRoomsChange }) {
 
   const addRoom = () => {
     if (!name.trim()) return;
-    onRoomsChange([...rooms, { id: uid(), name: name.trim(), judgeId: "" }]);
+    onRoomsChange([...rooms, { id: uid(), name: name.trim(), judgeId: "", panelistIds: [] }]);
     setName("");
   };
 
-  const assignJudge = (roomId, judgeId) => {
-    const alreadyAssigned = rooms.some((room) => room.id !== roomId && room.judgeId === judgeId);
-    if (judgeId && alreadyAssigned) return;
-    onRoomsChange(rooms.map((room) => room.id === roomId ? { ...room, judgeId } : room));
+  const assignedJudgeIds = (roomId) => rooms
+    .filter((room) => room.id !== roomId)
+    .flatMap((room) => [room.judgeId, ...(room.panelistIds || [])])
+    .filter(Boolean);
+
+  const assignHost = (roomId, judgeId) => {
+    if (judgeId && assignedJudgeIds(roomId).includes(judgeId)) return;
+    onRoomsChange(rooms.map((room) => room.id === roomId
+      ? { ...room, judgeId, panelistIds: (room.panelistIds || []).filter((id) => id !== judgeId) }
+      : room));
+  };
+
+  const assignPanelists = (roomId, panelistIds) => {
+    const room = rooms.find((item) => item.id === roomId);
+    const hostId = room?.judgeId || "";
+    const unavailable = assignedJudgeIds(roomId).filter((id) => id !== hostId);
+    const validPanelists = panelistIds.filter((id) => id !== hostId && !unavailable.includes(id));
+    onRoomsChange(rooms.map((item) => item.id === roomId ? { ...item, panelistIds: validPanelists } : item));
   };
 
   return (
@@ -1643,7 +1662,8 @@ export function RoomsPanel({ rooms, judges, onRoomsChange }) {
         {rooms.map((room) => (
           <div key={room.id} className="rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
             <div className="flex items-center justify-between gap-3"><span className="font-medium text-sm" style={{ color: "#14213D" }}>{room.name}</span><button onClick={() => onRoomsChange(rooms.filter((item) => item.id !== room.id))} style={{ color: "#EF6461" }} className="p-2" title="Remove room"><Trash2 size={16} /></button></div>
-            <Field label="Judge assigned to this room"><select value={room.judgeId || ""} onChange={(e) => assignJudge(room.id, e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}><option value="">Assign manually before release</option>{judges.filter((judge) => judge.id === room.judgeId || !rooms.some((otherRoom) => otherRoom.id !== room.id && otherRoom.judgeId === judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
+            <Field label="Host chair judge"><select value={room.judgeId || ""} onChange={(e) => assignHost(room.id, e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}><option value="">Assign host chair judge</option>{judges.filter((judge) => judge.id === room.judgeId || !assignedJudgeIds(room.id).includes(judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
+            <Field label="Panelists" hint="Select one or more unallocated judges"><select multiple value={room.panelistIds || []} onChange={(e) => assignPanelists(room.id, Array.from(e.target.selectedOptions, (option) => option.value))} className={inputBase + " min-h-24"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>{judges.filter((judge) => (room.panelistIds || []).includes(judge.id) || (judge.id !== room.judgeId && !assignedJudgeIds(room.id).includes(judge.id))).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
           </div>
         ))}
       </div>
@@ -1893,7 +1913,8 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
                         <option value="">Assign room manually</option>
                         {rooms.map((room) => {
                           const judge = judges.find((item) => item.id === room.judgeId);
-                          return <option key={room.id} value={room.id}>{room.name}{judge ? ` · Judge: ${judge.name}` : " · No judge assigned"}</option>;
+                          const panelists = (room.panelistIds || []).map((id) => judges.find((item) => item.id === id)?.name).filter(Boolean);
+                          return <option key={room.id} value={room.id}>{room.name}{judge ? ` · Host: ${judge.name}` : " · No host assigned"}{panelists.length ? ` · Panel: ${panelists.join(", ")}` : ""}</option>;
                         })}
                       </select>
                       {detail.viaTiebreak && (
@@ -2169,8 +2190,9 @@ export function PublicDraw({ config, tournament, teams, pairings, rooms, judges,
           teamName={teamName}
           roomLabel={(pairing) => {
             const room = rooms.find((item) => item.id === pairing.roomId);
-            const judge = room && judges.find((item) => item.id === room.judgeId);
-            return room ? `${room.name}${judge ? ` · Judge: ${judge.name}` : ""}` : "Room pending";
+            const host = room && judges.find((item) => item.id === room.judgeId);
+            const panelists = room ? (room.panelistIds || []).map((id) => judges.find((item) => item.id === id)?.name).filter(Boolean) : [];
+            return room ? `${room.name}${host ? ` · Host: ${host.name}` : ""}${panelists.length ? ` · Panel: ${panelists.join(", ")}` : ""}` : "Room pending";
           }}
         />
       )}
