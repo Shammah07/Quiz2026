@@ -63,6 +63,36 @@ create policy "authenticated organizers write own tournament state"
     where t.id = tournament_state.tournament_id and t.owner_id = auth.uid()
   ));
 
+-- Judges may submit scores for active tournaments, but cannot write
+-- configuration, pairings, rooms, or other tournament state.
+drop policy if exists "judges write active tournament scores" on public.tournament_state;
+create policy "judges write active tournament scores"
+  on public.tournament_state for all
+  using (
+    key like 'tournament:%:scores'
+    and exists (
+      select 1 from public.tournaments t
+      where t.id = tournament_state.tournament_id
+        and t.status = 'active'
+    )
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.role = 'judge'
+    )
+  )
+  with check (
+    key like 'tournament:%:scores'
+    and exists (
+      select 1 from public.tournaments t
+      where t.id = tournament_state.tournament_id
+        and t.status = 'active'
+    )
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.role = 'judge'
+    )
+  );
+
 create policy "public reads active teams"
   on public.teams for select
   using (exists (

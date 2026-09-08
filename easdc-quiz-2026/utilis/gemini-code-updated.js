@@ -791,8 +791,9 @@ export default function App() {
             return result;
           }}
           onScoresChange={async (next) => {
-            await set(STORAGE.scores, next);
-            setScores(next);
+            const saved = await set(STORAGE.scores, next);
+            if (saved) setScores(next);
+            return saved;
           }}
           onPairingsChange={async (next) => {
             await set(STORAGE.pairings, next);
@@ -870,8 +871,9 @@ export default function App() {
             return result;
           }}
           onScoresChange={async (next) => {
-            await set(STORAGE.scores, next);
-            setScores(next);
+            const saved = await set(STORAGE.scores, next);
+            if (saved) setScores(next);
+            return saved;
           }}
           onRefresh={loadAll}
           onLogout={() => {
@@ -2106,7 +2108,11 @@ export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onS
     const next = existing
       ? scores.map((s) => (s.id === existing.id ? entry : s))
       : [...scores, entry];
-    await onScoresChange(next);
+    const savedToStorage = await onScoresChange(next);
+    if (!savedToStorage) {
+      setErr("Score could not be saved. Ask the administrator to enable judge score access.");
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
