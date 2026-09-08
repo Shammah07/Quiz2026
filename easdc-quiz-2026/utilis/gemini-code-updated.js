@@ -2143,8 +2143,10 @@ export function Standings({ config, tournament, teams, scores, pairings, onRefre
   const publicRounds = roundsForPairings(config, pairings, true);
   const preliminaryRounds = publicRounds.filter((round) => round.stage === "preliminary");
   const breakRounds = publicRounds.filter((round) => round.stage !== "preliminary");
+  const breakStarted = breakRounds.length > 0;
+  const displayMode = mode === "break" && breakStarted ? "break" : "preliminary";
   const qualifiedTeams = preliminarySeedOrder(teams, config, scores);
-  const allStandings = mode === "preliminary"
+  const allStandings = displayMode === "preliminary"
     ? computeStandings(teams, scores, preliminaryRounds)
     : computeStandings(qualifiedTeams, scores, breakRounds);
   const standings = allStandings.filter((t) =>
@@ -2178,11 +2180,15 @@ export function Standings({ config, tournament, teams, scores, pairings, onRefre
       </div>
 
       <div className="flex gap-2 mb-5">
-        <Btn variant={mode === "preliminary" ? "primary" : "ghost"} onClick={() => setMode("preliminary")} className="flex-1">Preliminary rounds</Btn>
-        <Btn variant={mode === "break" ? "primary" : "ghost"} onClick={() => setMode("break")} className="flex-1">Break rounds</Btn>
+        <Btn variant={displayMode === "preliminary" ? "primary" : "ghost"} onClick={() => setMode("preliminary")} className="flex-1">Preliminary rounds</Btn>
+        {breakStarted && (
+          <Btn variant={displayMode === "break" ? "primary" : "ghost"} onClick={() => setMode("break")} className="flex-1">Break rounds</Btn>
+        )}
       </div>
 
-      {standings.length === 0 ? (
+      {displayMode === "break" && !breakStarted ? (
+        <EmptyNote>Break-round standings will appear when the break round starts.</EmptyNote>
+      ) : standings.length === 0 ? (
         <EmptyNote>No teams registered yet — check back once judges start registering teams.</EmptyNote>
       ) : (
         <div className="space-y-2">
