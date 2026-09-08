@@ -80,9 +80,9 @@ export function useStorage(tournamentId = null) {
       .upsert({ key: scopedKey(key), value, tournament_id: tournamentId || null, updated_at: new Date().toISOString() }, { onConflict: "key" });
     if (error) {
       console.error("Storage write failed:", error.message);
-      return false;
+      return { ok: false, error: error.message };
     }
-    return true;
+    return { ok: true };
   }, [scopedKey, tournamentId]);
 
   return { get, set };
@@ -792,7 +792,7 @@ export default function App() {
           }}
           onScoresChange={async (next) => {
             const saved = await set(STORAGE.scores, next);
-            if (saved) setScores(next);
+            if (saved.ok) setScores(next);
             return saved;
           }}
           onPairingsChange={async (next) => {
@@ -872,7 +872,7 @@ export default function App() {
           }}
           onScoresChange={async (next) => {
             const saved = await set(STORAGE.scores, next);
-            if (saved) setScores(next);
+            if (saved.ok) setScores(next);
             return saved;
           }}
           onRefresh={loadAll}
@@ -2109,8 +2109,8 @@ export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onS
       ? scores.map((s) => (s.id === existing.id ? entry : s))
       : [...scores, entry];
     const savedToStorage = await onScoresChange(next);
-    if (!savedToStorage) {
-      setErr("Score could not be saved. Ask the administrator to enable judge score access.");
+    if (!savedToStorage?.ok) {
+      setErr(savedToStorage?.error || "Score could not be saved. Check your judge account permissions.");
       return;
     }
     setSaved(true);

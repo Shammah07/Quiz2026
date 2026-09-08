@@ -63,6 +63,24 @@ create policy "authenticated organizers write own tournament state"
     where t.id = tournament_state.tournament_id and t.owner_id = auth.uid()
   ));
 
+-- Read the judge role inside a trusted function so profiles RLS cannot
+-- prevent the tournament_state policy from recognizing a judge.
+create or replace function public.is_judge()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'judge'
+  );
+$$;
+
+revoke all on function public.is_judge() from public;
+grant execute on function public.is_judge() to authenticated;
+
 -- Judges may submit scores for active tournaments, but cannot write
 -- configuration, pairings, rooms, or other tournament state.
 drop policy if exists "judges write active tournament scores" on public.tournament_state;
@@ -75,10 +93,7 @@ create policy "judges write active tournament scores"
       where t.id = tournament_state.tournament_id
         and t.status = 'active'
     )
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.role = 'judge'
-    )
+    and public.is_judge()
   )
   with check (
     key like 'tournament:%:scores'
@@ -87,10 +102,7 @@ create policy "judges write active tournament scores"
       where t.id = tournament_state.tournament_id
         and t.status = 'active'
     )
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.role = 'judge'
-    )
+    and public.is_judge()
   );
 
 create policy "public reads active teams"
