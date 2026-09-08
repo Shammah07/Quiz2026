@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Trophy, Shield, ClipboardList, Plus, Trash2, Check, Shuffle,
   ChevronDown, ChevronUp, LogOut, Users, Settings as SettingsIcon,
-  ListChecks, Search, Copy, CheckCircle2, AlertCircle, Loader2
+  ListChecks, Search, Copy, CheckCircle2, AlertCircle, Loader2, Pencil
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -173,6 +173,37 @@ export async function deleteTeamRow(id, tournamentId = null) {
     return false;
   }
   return true;
+}
+
+export async function updateTeamRow(id, fields, tournamentId = null) {
+  let query = supabase
+    .from("teams")
+    .update({
+      name: fields.name.trim(),
+      category: fields.category.trim() || null,
+      members: fields.members.trim() || null,
+    })
+    .eq("id", id);
+  if (tournamentId) query = query.eq("tournament_id", tournamentId);
+  const { data, error } = await query
+    .select("id, name, category, members, registered_by, created_at")
+    .single();
+  if (error) {
+    if (error.code === "23505") return { ok: false, error: "A team with that name already exists." };
+    console.error("Failed to update team:", error.message);
+    return { ok: false, error: "Could not update the team. Try again." };
+  }
+  return {
+    ok: true,
+    team: {
+      id: data.id,
+      name: data.name,
+      category: data.category || "",
+      members: data.members || "",
+      registeredBy: data.registered_by || "",
+      createdAt: data.created_at,
+    },
+  };
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
@@ -749,6 +780,11 @@ export default function App() {
             if (ok) setTeams((prev) => prev.filter((t) => t.id !== id));
             return ok;
           }}
+          onUpdateTeam={async (id, fields) => {
+            const result = await updateTeamRow(id, fields, activeTournamentId);
+            if (result.ok) setTeams((prev) => prev.map((team) => team.id === id ? result.team : team));
+            return result;
+          }}
           onScoresChange={async (next) => {
             await set(STORAGE.scores, next);
             setScores(next);
@@ -1255,7 +1291,7 @@ function DangerZone({ onResetTournament }) {
   );
 }
 
-export function AdminDashboard({ config, tournament, teams, scores, pairings, rooms, judges, tournaments, activeTournamentId, onConfigChange, onDeleteTeam, onScoresChange, onPairingsChange, onRoomsChange, onJudgesChange, onCreateTournament, onSelectTournament, onResetTournament, onRefresh, onLogout }) {
+export function AdminDashboard({ config, tournament, teams, scores, pairings, rooms, judges, tournaments, activeTournamentId, onConfigChange, onDeleteTeam, onUpdateTeam, onScoresChange, onPairingsChange, onRoomsChange, onJudgesChange, onCreateTournament, onSelectTournament, onResetTournament, onRefresh, onLogout }) {
   const [tab, setTab] = useState("overview");
   const status = todayStatus(config);
 
@@ -1301,7 +1337,7 @@ export function AdminDashboard({ config, tournament, teams, scores, pairings, ro
       )}
 
       {tab === "teams" && (
-        <TeamsPanel teams={teams} onDeleteTeam={onDeleteTeam} scores={scores} onScoresChange={onScoresChange} editable />
+        <TeamsPanel teams={teams} onDeleteTeam={onDeleteTeam} onUpdateTeam={onUpdateTeam} scores={scores} onScoresChange={onScoresChange} editable />
       )}
 
       {tab === "scores" && (
@@ -1413,13 +1449,30 @@ export function SettingsPanel({ config, onConfigChange }) {
   );
 }
 
-export function TeamsPanel({ teams, onDeleteTeam, scores, onScoresChange, editable }) {
+export function TeamsPanel({ teams, onDeleteTeam, onUpdateTeam, scores, onScoresChange, editable }) {
   const [q, setQ] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState({ name: "", category: "", members: "" });
+  const [error, setError] = useState("");
   const filtered = teams.filter((t) => t.name.toLowerCase().includes(q.toLowerCase()) || (t.category || "").toLowerCase().includes(q.toLowerCase()));
 
   const removeTeam = async (id) => {
     const ok = await onDeleteTeam(id);
     if (ok && onScoresChange) await onScoresChange(scores.filter((s) => s.teamId !== id));
+  };
+
+  const startEditing = (team) => {
+    setEditingId(team.id);
+    setDraft({ name: team.name, category: team.category || "", members: team.members || "" });
+    setError("");
+  };
+
+  const saveEdit = async () => {
+    if (!draft.name.trim()) return setError("Enter the team's name.");
+    const result = await onUpdateTeam(editingId, draft);
+    if (!result.ok) return setError(result.error);
+    setEditingId(null);
+    setError("");
   };
 
   return (
@@ -1432,16 +1485,37 @@ export function TeamsPanel({ teams, onDeleteTeam, scores, onScoresChange, editab
       <div className="space-y-2">
         {filtered.map((t) => (
           <div key={t.id} className="flex items-center justify-between rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
-            <div>
-              <div className="font-medium text-sm" style={{ color: "#14213D" }}>{t.name}</div>
-              <div className="text-xs mt-0.5" style={{ color: "#6B7490" }}>
-                {t.category || "No category"} · {t.members || "—"} members · registered by {t.registeredBy || "admin"}
+            {editingId === t.id ? (
+              <div className="flex-1 mr-3 space-y-2">
+                {error && <div className="text-xs" style={{ color: "#C1443E" }}>{error}</div>}
+                <TextInput value={draft.name} onChange={(e) => setDraft((current) => ({ ...current, name: e.target.value }))} placeholder="Team name" />
+                <div className="grid grid-cols-2 gap-2">
+                  <TextInput value={draft.category} onChange={(e) => setDraft((current) => ({ ...current, category: e.target.value }))} placeholder="Category" />
+                  <TextInput value={draft.members} onChange={(e) => setDraft((current) => ({ ...current, members: e.target.value }))} placeholder="Members" />
+                </div>
               </div>
-            </div>
+            ) : (
+              <div>
+                <div className="font-medium text-sm" style={{ color: "#14213D" }}>{t.name}</div>
+                <div className="text-xs mt-0.5" style={{ color: "#6B7490" }}>
+                  {t.category || "No category"} · {t.members || "—"} members · registered by {t.registeredBy || "admin"}
+                </div>
+              </div>
+            )}
             {editable && (
-              <button onClick={() => removeTeam(t.id)} style={{ color: "#EF6461" }} className="p-2">
-                <Trash2 size={16} />
-              </button>
+              <div className="flex items-center">
+                {editingId === t.id ? (
+                  <>
+                    <button onClick={saveEdit} style={{ color: "#0F8A6B" }} className="p-2" title="Save team changes"><Check size={16} /></button>
+                    <button onClick={() => { setEditingId(null); setError(""); }} style={{ color: "#6B7490" }} className="p-2" title="Cancel editing">×</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => startEditing(t)} style={{ color: "#06AED5" }} className="p-2" title="Edit team"><Pencil size={16} /></button>
+                    <button onClick={() => removeTeam(t.id)} style={{ color: "#EF6461" }} className="p-2" title="Delete team"><Trash2 size={16} /></button>
+                  </>
+                )}
+              </div>
             )}
           </div>
         ))}
