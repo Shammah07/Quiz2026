@@ -1647,12 +1647,28 @@ export function RoomsPanel({ rooms, judges, onRoomsChange }) {
       : room));
   };
 
-  const assignPanelists = (roomId, panelistIds) => {
+  const assignPanelist = (roomId, panelistIndex, judgeId) => {
     const room = rooms.find((item) => item.id === roomId);
-    const hostId = room?.judgeId || "";
-    const unavailable = assignedJudgeIds(roomId).filter((id) => id !== hostId);
-    const validPanelists = panelistIds.filter((id) => id !== hostId && !unavailable.includes(id));
-    onRoomsChange(rooms.map((item) => item.id === roomId ? { ...item, panelistIds: validPanelists } : item));
+    if (!room) return;
+    const panelistIds = [...(room.panelistIds || [])];
+    panelistIds[panelistIndex] = judgeId;
+    onRoomsChange(rooms.map((item) => item.id === roomId ? { ...item, panelistIds } : item));
+  };
+
+  const addPanelist = (roomId) => {
+    const room = rooms.find((item) => item.id === roomId);
+    if (!room) return;
+    onRoomsChange(rooms.map((item) => item.id === roomId
+      ? { ...item, panelistIds: [...(item.panelistIds || []), ""] }
+      : item));
+  };
+
+  const removePanelist = (roomId, panelistIndex) => {
+    const room = rooms.find((item) => item.id === roomId);
+    if (!room) return;
+    onRoomsChange(rooms.map((item) => item.id === roomId
+      ? { ...item, panelistIds: (item.panelistIds || []).filter((_, index) => index !== panelistIndex) }
+      : item));
   };
 
   return (
@@ -1663,7 +1679,14 @@ export function RoomsPanel({ rooms, judges, onRoomsChange }) {
           <div key={room.id} className="rounded-xl border p-3.5" style={{ borderColor: "#DBD8CE", background: "#FFFFFF" }}>
             <div className="flex items-center justify-between gap-3"><span className="font-medium text-sm" style={{ color: "#14213D" }}>{room.name}</span><button onClick={() => onRoomsChange(rooms.filter((item) => item.id !== room.id))} style={{ color: "#EF6461" }} className="p-2" title="Remove room"><Trash2 size={16} /></button></div>
             <Field label="Host chair judge"><select value={room.judgeId || ""} onChange={(e) => assignHost(room.id, e.target.value)} className={inputBase} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}><option value="">Assign host chair judge</option>{judges.filter((judge) => judge.id === room.judgeId || !assignedJudgeIds(room.id).includes(judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
-            <Field label="Panelists" hint="Select one or more unallocated judges"><select multiple value={room.panelistIds || []} onChange={(e) => assignPanelists(room.id, Array.from(e.target.selectedOptions, (option) => option.value))} className={inputBase + " min-h-24"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>{judges.filter((judge) => (room.panelistIds || []).includes(judge.id) || (judge.id !== room.judgeId && !assignedJudgeIds(room.id).includes(judge.id))).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select></Field>
+            <Field label="Panelists" hint="Add one dropdown for each panelist"><div className="space-y-2">{(room.panelistIds || []).map((panelistId, panelistIndex) => {
+              const selectedElsewhere = new Set([
+                ...assignedJudgeIds(room.id),
+                ...(room.panelistIds || []).filter((id, index) => index !== panelistIndex),
+                room.judgeId,
+              ].filter(Boolean));
+              return <div key={`${room.id}-panelist-${panelistIndex}`} className="flex gap-2"><select value={panelistId || ""} onChange={(e) => assignPanelist(room.id, panelistIndex, e.target.value)} className={inputBase + " flex-1"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}><option value="">Assign panelist</option>{judges.filter((judge) => judge.id === panelistId || !selectedElsewhere.has(judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}</option>)}</select><button onClick={() => removePanelist(room.id, panelistIndex)} style={{ color: "#EF6461" }} className="p-2" title="Remove panelist"><Trash2 size={16} /></button></div>;
+            })}<Btn variant="ghost" onClick={() => addPanelist(room.id)} className="w-full"><Plus size={15} /> Add panelist</Btn></div></Field>
           </div>
         ))}
       </div>
