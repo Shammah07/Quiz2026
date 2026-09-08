@@ -1810,6 +1810,7 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
   const [busy, setBusy] = useState(null);
   const top8 = preliminarySeedOrder(teams, config, scores);
   const teamName = (id) => (id ? teams.find((t) => t.id === id)?.name || "Unknown team" : "Bye");
+  const teamCategory = (id) => (id ? teams.find((t) => t.id === id)?.category || "" : "");
 
   const hasPairings = (stage, matchLabel) =>
     pairings.some((p) => p.stage === stage && (stage !== "preliminary" || p.matchLabel === matchLabel));
@@ -1922,11 +1923,13 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
                     <div key={p.id} className="rounded-lg px-2.5 py-1.5" style={{ background: "#F7F5F0" }}>
                       <div className="flex items-center justify-between text-sm">
                         <span style={{ color: detail.winnerId === p.teamAId ? "#0F8A6B" : "#14213D", fontWeight: detail.winnerId === p.teamAId ? 600 : 400 }}>
-                          {teamName(p.teamAId)}
+                          <div>{teamName(p.teamAId)}</div>
+                          {teamCategory(p.teamAId) && <div className="text-[10px] font-normal" style={{ color: "#6B7490" }}>{teamCategory(p.teamAId)}</div>}
                         </span>
                         <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
                         <span style={{ color: detail.winnerId === p.teamBId ? "#0F8A6B" : "#14213D", fontWeight: detail.winnerId === p.teamBId ? 600 : 400 }}>
-                          {teamName(p.teamBId)}
+                          <div>{teamName(p.teamBId)}</div>
+                          {teamCategory(p.teamBId) && <div className="text-[10px] font-normal" style={{ color: "#6B7490" }}>{teamCategory(p.teamBId)}</div>}
                         </span>
                       </div>
                       <div className="text-[10px] mt-1 text-center" style={{ color: p.released ? "#0F8A6B" : "#9098B0" }}>
@@ -2185,6 +2188,7 @@ export const MEDAL = ["#FFB627", "#C7CDD9", "#C97B4A"];
 export function PublicDraw({ config, tournament, teams, pairings, rooms, judges, scores, onRefresh, onBack }) {
   const latestReleased = currentPairings(pairings, true);
   const teamName = (id) => (id ? teams.find((team) => team.id === id)?.name || "Unknown team" : "Bye");
+  const teamCategory = (id) => (id ? teams.find((team) => team.id === id)?.category || "" : "");
   const label = latestReleased[0]
     ? latestReleased[0].stage === "preliminary"
       ? `${STAGE_LABELS.preliminary} · ${latestReleased[0].matchLabel}`
@@ -2211,6 +2215,7 @@ export function PublicDraw({ config, tournament, teams, pairings, rooms, judges,
           title={label}
           rows={latestReleased.map((pairing) => ({ ...pairing, ...matchWinnerDetail(pairing, config, scores) }))}
           teamName={teamName}
+          teamCategory={teamCategory}
           roomLabel={(pairing) => {
             const room = rooms.find((item) => item.id === pairing.roomId);
             const host = room && judges.find((item) => item.id === room.judgeId);
@@ -2223,16 +2228,16 @@ export function PublicDraw({ config, tournament, teams, pairings, rooms, judges,
   );
 }
 
-export function BracketStageBlock({ title, rows, teamName, roomLabel }) {
+export function BracketStageBlock({ title, rows, teamName, teamCategory, roomLabel }) {
   return (
     <div className="space-y-2">
       <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "#06AED5" }}>{title}</div>
       {rows.map((p) => (
         <div key={p.id}>
           <div className="flex items-center gap-2 text-sm">
-            <span className="flex-1 rounded-lg px-2.5 py-2" style={{ background: p.winnerId === p.teamAId ? "#E6F7F3" : "#F7F5F0", color: "#14213D", fontWeight: p.winnerId === p.teamAId ? 600 : 400 }}>{teamName(p.teamAId)}</span>
+            <span className="flex-1 rounded-lg px-2.5 py-2" style={{ background: p.winnerId === p.teamAId ? "#E6F7F3" : "#F7F5F0", color: "#14213D", fontWeight: p.winnerId === p.teamAId ? 600 : 400 }}><div>{teamName(p.teamAId)}</div>{teamCategory?.(p.teamAId) && <div className="text-[10px] font-normal mt-0.5" style={{ color: "#6B7490" }}>{teamCategory(p.teamAId)}</div>}</span>
             <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
-            <span className="flex-1 rounded-lg px-2.5 py-2 text-right" style={{ background: p.winnerId === p.teamBId ? "#E6F7F3" : "#F7F5F0", color: "#14213D", fontWeight: p.winnerId === p.teamBId ? 600 : 400 }}>{teamName(p.teamBId)}</span>
+            <span className="flex-1 rounded-lg px-2.5 py-2 text-right" style={{ background: p.winnerId === p.teamBId ? "#E6F7F3" : "#F7F5F0", color: "#14213D", fontWeight: p.winnerId === p.teamBId ? 600 : 400 }}><div>{teamName(p.teamBId)}</div>{teamCategory?.(p.teamBId) && <div className="text-[10px] font-normal mt-0.5" style={{ color: "#6B7490" }}>{teamCategory(p.teamBId)}</div>}</span>
           </div>
           {roomLabel && <div className="text-[10px] mt-1 text-center" style={{ color: "#6B7490" }}>Room: {roomLabel(p)}</div>}
           {p.viaTiebreak && <div className="text-[10px] mt-0.5 text-center" style={{ color: "#0F8A6B" }}>Decided by Category of Choice tiebreaker</div>}
@@ -2369,6 +2374,7 @@ export function Standings({ config, tournament, teams, scores, pairings, onRefre
 export function BracketPanel({ config, teams, scores, pairings }) {
   const qualifiedCount = config.qualificationCount || 8;
   const teamName = (id) => (id ? teams.find((t) => t.id === id)?.name || "Unknown team" : "Bye");
+  const teamCategory = (id) => (id ? teams.find((t) => t.id === id)?.category || "" : "");
 
   const stageRows = (stage) =>
     pairings
@@ -2406,13 +2412,13 @@ export function BracketPanel({ config, teams, scores, pairings }) {
         <span className="font-mono text-[10px] tracking-widest" style={{ color: "#06AED5" }}>BRACKET</span>
       </div>
 
-      {preliminary.length > 0 && <BracketStageBlock title="Released Preliminary Draw" rows={preliminary} teamName={teamName} />}
-      {qf.length > 0 && <BracketStageBlock title="Quarter Finals" rows={qf} teamName={teamName} />}
-      {sf.length > 0 && <BracketStageBlock title="Semi Finals" rows={sf} teamName={teamName} />}
+      {preliminary.length > 0 && <BracketStageBlock title="Released Preliminary Draw" rows={preliminary} teamName={teamName} teamCategory={teamCategory} />}
+      {qf.length > 0 && <BracketStageBlock title="Quarter Finals" rows={qf} teamName={teamName} teamCategory={teamCategory} />}
+      {sf.length > 0 && <BracketStageBlock title="Semi Finals" rows={sf} teamName={teamName} teamCategory={teamCategory} />}
       {sf.length === 0 && (
         <p className="text-xs" style={{ color: "#9098B0" }}>Semi Final pairings will appear once all Quarter Finals have a winner.</p>
       )}
-      {final.length > 0 && <BracketStageBlock title="Grand Finale" rows={final} teamName={teamName} />}
+      {final.length > 0 && <BracketStageBlock title="Grand Finale" rows={final} teamName={teamName} teamCategory={teamCategory} />}
       {sf.length > 0 && final.length === 0 && (
         <p className="text-xs" style={{ color: "#9098B0" }}>The Final pairing will appear once both Semi Finals have a winner.</p>
       )}
