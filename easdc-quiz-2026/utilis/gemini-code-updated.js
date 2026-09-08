@@ -2271,7 +2271,7 @@ export function Standings({ config, tournament, teams, scores, pairings, onRefre
   }, [onRefresh]);
 
   const publicRounds = roundsForPairings(config, pairings, true);
-  const preliminaryRounds = publicRounds.filter((round) => round.stage === "preliminary");
+  const preliminaryRounds = config.rounds.filter((round) => round.stage === "preliminary");
   const breakRounds = publicRounds.filter((round) => round.stage !== "preliminary");
   const breakStarted = breakRounds.length > 0;
   const displayMode = mode === "break" && breakStarted ? "break" : "preliminary";
