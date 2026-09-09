@@ -1936,14 +1936,14 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
                         <div className="flex-1 min-w-0">
                           <select value={p.teamAId || ""} onChange={(e) => updateMatchupTeam(p, "teamAId", e.target.value)} className={inputBase + " text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
                             <option value="">Bye</option>
-                            {teams.filter((team) => team.id === p.teamAId || !pairings.some((item) => item.id !== p.id && item.stage === p.stage && (item.stage !== "preliminary" || item.matchLabel === p.matchLabel) && (item.teamAId === team.id || item.teamBId === team.id)) && team.id !== p.teamBId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.category ? ` · ${team.category}` : ""}</option>)}
+                            {teams.map((team) => <option key={team.id} value={team.id}>{team.name}{team.category ? ` · ${team.category}` : ""}</option>)}
                           </select>
                         </div>
                         <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
                         <div className="flex-1 min-w-0">
                           <select value={p.teamBId || ""} onChange={(e) => updateMatchupTeam(p, "teamBId", e.target.value)} className={inputBase + " text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
                             <option value="">Bye</option>
-                            {teams.filter((team) => team.id === p.teamBId || !pairings.some((item) => item.id !== p.id && item.stage === p.stage && (item.stage !== "preliminary" || item.matchLabel === p.matchLabel) && (item.teamAId === team.id || item.teamBId === team.id)) && team.id !== p.teamAId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.category ? ` · ${team.category}` : ""}</option>)}
+                            {teams.map((team) => <option key={team.id} value={team.id}>{team.name}{team.category ? ` · ${team.category}` : ""}</option>)}
                           </select>
                         </div>
                       </div>
