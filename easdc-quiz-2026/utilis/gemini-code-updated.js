@@ -1885,9 +1885,18 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
     const stagePairings = pairings.filter((item) => item.stage === pairing.stage && item.id !== pairing.id && (
       pairing.stage !== "preliminary" || item.matchLabel === pairing.matchLabel
     ));
-    const alreadyUsed = stagePairings.some((item) => item.teamAId === teamId || item.teamBId === teamId);
-    if (teamId && alreadyUsed) return;
-    await onPairingsChange(pairings.map((item) => item.id === pairing.id ? { ...item, [side]: teamId } : item));
+    const previousPairing = teamId && stagePairings.find((item) => item.teamAId === teamId || item.teamBId === teamId);
+    if (!previousPairing) {
+      await onPairingsChange(pairings.map((item) => item.id === pairing.id ? { ...item, [side]: teamId } : item));
+      return;
+    }
+    const previousSide = previousPairing.teamAId === teamId ? "teamAId" : "teamBId";
+    const replacedTeamId = pairing[side];
+    await onPairingsChange(pairings.map((item) => {
+      if (item.id === pairing.id) return { ...item, [side]: teamId };
+      if (item.id === previousPairing.id) return { ...item, [previousSide]: replacedTeamId };
+      return item;
+    }));
   };
 
   return (
