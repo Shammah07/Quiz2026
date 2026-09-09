@@ -1812,7 +1812,6 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
   const [busy, setBusy] = useState(null);
   const top8 = preliminarySeedOrder(teams, config, scores);
   const teamName = (id) => (id ? teams.find((t) => t.id === id)?.name || "Unknown team" : "Bye");
-  const teamCategory = (id) => (id ? teams.find((t) => t.id === id)?.category || "" : "");
 
   const hasPairings = (stage, matchLabel) =>
     pairings.some((p) => p.stage === stage && (stage !== "preliminary" || p.matchLabel === matchLabel));
@@ -1880,6 +1879,16 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
   const assignRoom = async (pairingId, roomId) => {
     await onPairingsChange(pairings.map((pairing) => pairing.id === pairingId ? { ...pairing, roomId } : pairing));
   };
+  const updateMatchupTeam = async (pairing, side, teamId) => {
+    const otherTeamId = side === "teamAId" ? pairing.teamBId : pairing.teamAId;
+    if (teamId && teamId === otherTeamId) return;
+    const stagePairings = pairings.filter((item) => item.stage === pairing.stage && item.id !== pairing.id && (
+      pairing.stage !== "preliminary" || item.matchLabel === pairing.matchLabel
+    ));
+    const alreadyUsed = stagePairings.some((item) => item.teamAId === teamId || item.teamBId === teamId);
+    if (teamId && alreadyUsed) return;
+    await onPairingsChange(pairings.map((item) => item.id === pairing.id ? { ...item, [side]: teamId } : item));
+  };
 
   return (
     <div className="space-y-3">
@@ -1923,16 +1932,20 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
                   const tied = isKnockout && isTiedNeedingBreak(p, config, scores);
                   return (
                     <div key={p.id} className="rounded-lg px-2.5 py-1.5" style={{ background: "#F7F5F0" }}>
-                      <div className="flex items-center justify-between text-sm">
-                        <span style={{ color: detail.winnerId === p.teamAId ? "#0F8A6B" : "#14213D", fontWeight: detail.winnerId === p.teamAId ? 600 : 400 }}>
-                          <div>{teamName(p.teamAId)}</div>
-                          {teamCategory(p.teamAId) && <div className="text-[10px] font-normal" style={{ color: "#6B7490" }}>{teamCategory(p.teamAId)}</div>}
-                        </span>
+                      <div className="flex items-start justify-between gap-2 text-sm">
+                        <div className="flex-1 min-w-0">
+                          <select value={p.teamAId || ""} onChange={(e) => updateMatchupTeam(p, "teamAId", e.target.value)} className={inputBase + " text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
+                            <option value="">Bye</option>
+                            {teams.filter((team) => team.id === p.teamAId || !pairings.some((item) => item.id !== p.id && item.stage === p.stage && (item.stage !== "preliminary" || item.matchLabel === p.matchLabel) && (item.teamAId === team.id || item.teamBId === team.id)) && team.id !== p.teamBId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.category ? ` · ${team.category}` : ""}</option>)}
+                          </select>
+                        </div>
                         <span className="text-xs" style={{ color: "#9098B0" }}>vs</span>
-                        <span style={{ color: detail.winnerId === p.teamBId ? "#0F8A6B" : "#14213D", fontWeight: detail.winnerId === p.teamBId ? 600 : 400 }}>
-                          <div>{teamName(p.teamBId)}</div>
-                          {teamCategory(p.teamBId) && <div className="text-[10px] font-normal" style={{ color: "#6B7490" }}>{teamCategory(p.teamBId)}</div>}
-                        </span>
+                        <div className="flex-1 min-w-0">
+                          <select value={p.teamBId || ""} onChange={(e) => updateMatchupTeam(p, "teamBId", e.target.value)} className={inputBase + " text-xs"} style={{ borderColor: "#DBD8CE", background: "#FFFFFF", color: "#14213D" }}>
+                            <option value="">Bye</option>
+                            {teams.filter((team) => team.id === p.teamBId || !pairings.some((item) => item.id !== p.id && item.stage === p.stage && (item.stage !== "preliminary" || item.matchLabel === p.matchLabel) && (item.teamAId === team.id || item.teamBId === team.id)) && team.id !== p.teamAId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.category ? ` · ${team.category}` : ""}</option>)}
+                          </select>
+                        </div>
                       </div>
                       <div className="text-[10px] mt-1 text-center" style={{ color: p.released ? "#0F8A6B" : "#9098B0" }}>
                         {p.released ? "Released to public" : p.roomId ? "Room assigned · private draw" : "Assign a room before release"}
