@@ -1879,6 +1879,9 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
   const assignRoom = async (pairingId, roomId) => {
     await onPairingsChange(pairings.map((pairing) => pairing.id === pairingId ? { ...pairing, roomId } : pairing));
   };
+  const deleteMatchup = async (pairingId) => {
+    await onPairingsChange(pairings.filter((pairing) => pairing.id !== pairingId));
+  };
   const updateMatchupTeam = async (pairing, side, teamId) => {
     const otherTeamId = side === "teamAId" ? pairing.teamBId : pairing.teamAId;
     if (teamId && teamId === otherTeamId) return;
@@ -1967,6 +1970,9 @@ export function PairingsPanel({ config, teams, scores, pairings, rooms, judges, 
                           return <option key={room.id} value={room.id}>{room.name}{judge ? ` · Host: ${judge.name}` : " · No host assigned"}{panelists.length ? ` · Panel: ${panelists.join(", ")}` : ""}</option>;
                         })}
                       </select>
+                      <button onClick={() => deleteMatchup(p.id)} style={{ color: "#EF6461" }} className="p-2 mt-1" title="Delete this matchup">
+                        <Trash2 size={15} />
+                      </button>
                       {detail.viaTiebreak && (
                         <div className="flex items-center justify-between mt-1.5">
                           <span className="text-[10px]" style={{ color: "#0F8A6B" }}>Decided by Category of Choice tiebreaker</span>
