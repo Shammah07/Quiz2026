@@ -397,6 +397,10 @@ export function currentGeneratedRounds(config, pairings) {
   return roundsForPairings(config, currentPairings(pairings));
 }
 
+export function releasedRounds(config, pairings) {
+  return roundsForPairings(config, pairings, true);
+}
+
 export function teamPointsIn(teamId, rounds, scores) {
   const ids = new Set(rounds.map((r) => r.id));
   return scores
@@ -2107,7 +2111,7 @@ export function RegisterTeamForm({ teams, onRegisterTeam }) {
 }
 
 export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onScoresChange }) {
-  const generatedRounds = currentGeneratedRounds(config, pairings);
+  const generatedRounds = releasedRounds(config, pairings);
   const availableTeams = teamsForCurrentPairingStage(teams, config, scores, pairings);
   const [teamId, setTeamId] = useState("");
   const [roundId, setRoundId] = useState(generatedRounds[0]?.id || "");
