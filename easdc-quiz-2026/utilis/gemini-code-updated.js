@@ -1733,11 +1733,15 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
     .sort((a, b) => (b.score?.points ?? -1) - (a.score?.points ?? -1));
 
   const scoredCount = rows.filter((r) => r.score).length;
-  const pendingCount = scores.filter((score) => score.approved !== true).length;
-  const approvedCount = scores.filter((score) => score.approved === true).length;
+  const roundScores = scores.filter((score) => score.roundId === activeRoundId);
+  const pendingCount = roundScores.filter((score) => score.approved !== true).length;
+  const approvedCount = roundScores.filter((score) => score.approved === true).length;
+  const roundApproved = roundScores.length > 0 && pendingCount === 0;
 
-  const setAllApproval = async (approved) => {
-    await onScoresChange(scores.map((score) => ({ ...score, approved })));
+  const setRoundApproval = async (approved) => {
+    await onScoresChange(scores.map((score) => (
+      score.roundId === activeRoundId ? { ...score, approved } : score
+    )));
   };
 
   return (
@@ -1767,10 +1771,10 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
           {editable && scores.length > 0 && (
             <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 mb-4" style={{ background: "#FFF7E0" }}>
               <span className="text-xs" style={{ color: "#8A6500" }}>{pendingCount > 0 ? `${pendingCount} score${pendingCount === 1 ? "" : "s"} awaiting approval` : `${approvedCount} score${approvedCount === 1 ? "" : "s"} approved`}</span>
-              {pendingCount > 0 ? (
-                <Btn variant="gold" onClick={() => setAllApproval(true)}>Approve all scores</Btn>
+              {!roundApproved ? (
+                <Btn variant="gold" onClick={() => setRoundApproval(true)} disabled={roundScores.length === 0}>Approve this round</Btn>
               ) : (
-                <Btn variant="ghost" onClick={() => setAllApproval(false)}>Unapprove all scores</Btn>
+                <Btn variant="ghost" onClick={() => setRoundApproval(false)}>Unapprove this round</Btn>
               )}
             </div>
           )}
