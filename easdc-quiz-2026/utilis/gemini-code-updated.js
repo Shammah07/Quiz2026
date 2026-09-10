@@ -1734,9 +1734,10 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
 
   const scoredCount = rows.filter((r) => r.score).length;
   const pendingCount = scores.filter((score) => score.approved !== true).length;
+  const approvedCount = scores.filter((score) => score.approved === true).length;
 
-  const approveAll = async () => {
-    await onScoresChange(scores.map((score) => ({ ...score, approved: true })));
+  const setAllApproval = async (approved) => {
+    await onScoresChange(scores.map((score) => ({ ...score, approved })));
   };
 
   return (
@@ -1765,8 +1766,12 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
 
           {editable && scores.length > 0 && (
             <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 mb-4" style={{ background: "#FFF7E0" }}>
-              <span className="text-xs" style={{ color: "#8A6500" }}>{pendingCount} score{pendingCount === 1 ? "" : "s"} awaiting approval</span>
-              <Btn variant="gold" onClick={approveAll} disabled={pendingCount === 0}>Approve all scores</Btn>
+              <span className="text-xs" style={{ color: "#8A6500" }}>{pendingCount > 0 ? `${pendingCount} score${pendingCount === 1 ? "" : "s"} awaiting approval` : `${approvedCount} score${approvedCount === 1 ? "" : "s"} approved`}</span>
+              {pendingCount > 0 ? (
+                <Btn variant="gold" onClick={() => setAllApproval(true)}>Approve all scores</Btn>
+              ) : (
+                <Btn variant="ghost" onClick={() => setAllApproval(false)}>Unapprove all scores</Btn>
+              )}
             </div>
           )}
 
