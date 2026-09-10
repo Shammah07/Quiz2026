@@ -33,6 +33,16 @@ export const STORAGE = {
   judges: "judges",
 };
 
+export function preliminaryScoresApproved(config, scores) {
+  const preliminaryRoundIds = new Set(config.rounds.filter((round) => round.stage === "preliminary").map((round) => round.id));
+  const preliminaryScores = scores.filter((score) => preliminaryRoundIds.has(score.roundId));
+  return preliminaryScores.length > 0 && preliminaryScores.every((score) => score.approved === true);
+}
+
+export function approvedScores(scores) {
+  return scores.filter((score) => score.approved === true);
+}
+
 export function tournamentUrl(tournamentId) {
   if (typeof window === "undefined") return `?tournament=${encodeURIComponent(tournamentId)}`;
   return `${window.location.origin}/?tournament=${encodeURIComponent(tournamentId)}`;
@@ -1723,6 +1733,11 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
     .sort((a, b) => (b.score?.points ?? -1) - (a.score?.points ?? -1));
 
   const scoredCount = rows.filter((r) => r.score).length;
+  const pendingCount = scores.filter((score) => score.approved !== true).length;
+
+  const approveAll = async () => {
+    await onScoresChange(scores.map((score) => ({ ...score, approved: true })));
+  };
 
   return (
     <div>
@@ -1747,6 +1762,13 @@ export function ScoresPanel({ teams, scores, rounds, onScoresChange, editable })
               ))}
             </select>
           </Field>
+
+          {editable && scores.length > 0 && (
+            <div className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 mb-4" style={{ background: "#FFF7E0" }}>
+              <span className="text-xs" style={{ color: "#8A6500" }}>{pendingCount} score{pendingCount === 1 ? "" : "s"} awaiting approval</span>
+              <Btn variant="gold" onClick={approveAll} disabled={pendingCount === 0}>Approve all scores</Btn>
+            </div>
+          )}
 
           {teams.length === 0 ? (
             <EmptyNote>No teams registered yet.</EmptyNote>
@@ -2136,6 +2158,7 @@ export function EnterScoreForm({ config, teams, scores, pairings, judgeName, onS
       teamId, roundId: activeRoundId, points: val,
       judgeName,
       enteredAt: new Date().toISOString(),
+      approved: false,
     };
     const next = existing
       ? scores.map((s) => (s.id === existing.id ? entry : s))
@@ -2303,14 +2326,15 @@ export function Standings({ config, tournament, teams, scores, pairings, onRefre
   }, [onRefresh]);
 
   const publicRounds = roundsForPairings(config, pairings, true);
+  const visibleScores = approvedScores(scores);
   const preliminaryRounds = config.rounds.filter((round) => round.stage === "preliminary");
   const breakRounds = publicRounds.filter((round) => round.stage !== "preliminary");
-  const breakStarted = breakRounds.length > 0;
+  const breakStarted = breakRounds.length > 0 && preliminaryScoresApproved(config, scores);
   const displayMode = mode === "break" && breakStarted ? "break" : "preliminary";
-  const qualifiedTeams = preliminarySeedOrder(teams, config, scores);
+  const qualifiedTeams = preliminarySeedOrder(teams, config, visibleScores);
   const allStandings = displayMode === "preliminary"
-    ? computeStandings(teams, scores, preliminaryRounds)
-    : computeStandings(qualifiedTeams, scores, breakRounds);
+    ? computeStandings(teams, visibleScores, preliminaryRounds)
+    : computeStandings(qualifiedTeams, visibleScores, breakRounds);
   const standings = allStandings.filter((t) =>
     t.name.toLowerCase().includes(q.toLowerCase()) || (t.category || "").toLowerCase().includes(q.toLowerCase())
   );
